@@ -1,0 +1,97 @@
+import { useRef } from 'react'
+import type { TimeOfDay } from './Scene3D'
+import { DownloadIcon, UploadIcon, SunIcon, DuskIcon, MoonIcon, TargetIcon, PlusIcon } from './icons'
+
+interface TopBarProps {
+  projectName: string
+  onRename: (name: string) => void
+  timeOfDay: TimeOfDay
+  onTimeOfDay: (value: TimeOfDay) => void
+  onExport: () => void
+  onImport: (file: File) => void
+  onNewProject: () => void
+  onResetView: () => void
+  savedLabel: string
+}
+
+const timeOptions: { key: TimeOfDay; label: string; icon: typeof SunIcon }[] = [
+  { key: 'day', label: 'Dia', icon: SunIcon },
+  { key: 'dusk', label: 'Entardecer', icon: DuskIcon },
+  { key: 'night', label: 'Noite', icon: MoonIcon },
+]
+
+export function TopBar({
+  projectName,
+  onRename,
+  timeOfDay,
+  onTimeOfDay,
+  onExport,
+  onImport,
+  onNewProject,
+  onResetView,
+  savedLabel,
+}: TopBarProps) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  return (
+    <header className="topbar">
+      <div className="topbar-brand">
+        <span className="brand-mark">Maqo</span>
+        <input
+          className="project-name-input"
+          value={projectName}
+          onChange={(event) => onRename(event.target.value)}
+          spellCheck={false}
+        />
+        <span className="saved-indicator">{savedLabel}</span>
+      </div>
+
+      <div className="topbar-center">
+        <div className="time-toggle">
+          {timeOptions.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              type="button"
+              className={timeOfDay === key ? 'time-btn active' : 'time-btn'}
+              onClick={() => onTimeOfDay(key)}
+              title={label}
+            >
+              <Icon size={15} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="topbar-actions">
+        <button type="button" className="icon-btn" onClick={onResetView} title="Repor vista">
+          <TargetIcon size={16} />
+          <span>Vista</span>
+        </button>
+        <button type="button" className="icon-btn" onClick={onExport} title="Exportar projeto (.json)">
+          <DownloadIcon size={16} />
+          <span>Exportar</span>
+        </button>
+        <button type="button" className="icon-btn" onClick={() => fileInputRef.current?.click()} title="Importar projeto">
+          <UploadIcon size={16} />
+          <span>Importar</span>
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            if (file) onImport(file)
+            event.target.value = ''
+          }}
+        />
+        <button type="button" className="icon-btn primary" onClick={onNewProject} title="Novo projeto">
+          <PlusIcon size={16} />
+          <span>Novo</span>
+        </button>
+      </div>
+    </header>
+  )
+}
