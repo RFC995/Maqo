@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import {
   deviceColors,
   deviceDefaultRadius,
@@ -11,8 +11,39 @@ import {
   type MountType,
 } from '../types'
 import { planPresets, type PlanPreset } from '../planPresets'
-import { catalogById, modelsForType } from '../catalog'
-import { GatewayIcon, SensorIcon, CameraIcon, RepeaterIcon, TrashIcon, LayersIcon } from './icons'
+import { resolveModel } from '../catalog'
+import {
+  analyseLink,
+  defaultPropagation,
+  estimateBattery,
+  linkQualityColors,
+  linkQualityLabels,
+  sfColors,
+  type Propagation,
+} from '../rf'
+import { ModelGallery, ModelPicker, ModelSpecSheet } from './ModelSpecs'
+import { perfisDeQualidade, type Qualidade } from '../qualidade'
+import { calcularMapaCalor, escalaMapaCalor } from '../heatmap'
+import { DeviceArtwork } from './DeviceArtwork'
+import {
+  GatewayIcon,
+  SensorIcon,
+  CameraIcon,
+  RepeaterIcon,
+  TrashIcon,
+  LayersIcon,
+  SignalIcon,
+  BatteryIcon,
+} from './icons'
+
+type PanelTab = 'colocar' | 'planos' | 'lista' | 'vista'
+
+const panelTabLabels: Record<PanelTab, string> = {
+  colocar: 'Colocar',
+  planos: 'Planos',
+  lista: 'Lista',
+  vista: 'Vista',
+}
 
 const deviceIcons: Record<DeviceType, typeof GatewayIcon> = {
   gateway: GatewayIcon,
@@ -42,6 +73,12 @@ interface DevicesPanelProps {
   onToggleLabels: () => void
   onApplyPlan: (preset: PlanPreset) => void
   onClearAll: () => void
+  propagation?: Propagation
+  uplinkMinutes?: number
+  qualidade?: Qualidade
+  onQualidade?: (q: Qualidade) => void
+  mapaCalorVisivel?: boolean
+  onToggleMapaCalor?: () => void
 }
 
 export function DevicesPanel({
@@ -65,12 +102,49 @@ export function DevicesPanel({
   onToggleLabels,
   onApplyPlan,
   onClearAll,
+  propagation = defaultPropagation,
+  uplinkMinutes = 10,
+  qualidade = 'equilibrado',
+  onQualidade,
+  mapaCalorVisivel = false,
+  onToggleMapaCalor,
 }: DevicesPanelProps) {
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId) ?? null
+  const [tab, setTab] = useState<PanelTab>('colocar')
+
+  // the picture is persuasive, but a proposal needs the number
+  const coberturaDoPiso = useMemo(() => {
+    if (!mapaCalorVisivel || typeof activeFloor !== 'number') return null
+    return calcularMapaCalor(building, activeFloor, devices, propagation)
+  }, [mapaCalorVisivel, activeFloor, building, devices, propagation])
+
+  // arming a type or picking a device is a request to see that section
+  useEffect(() => {
+    if (placementType) setTab('colocar')
+  }, [placementType])
+  useEffect(() => {
+    if (selectedDeviceId) setTab('lista')
+  }, [selectedDeviceId])
 
   return (
     <>
-      <div className="panel-block">
+      <nav className="panel-tabs" role="tablist">
+        {(Object.keys(panelTabLabels) as PanelTab[]).map((id) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            className={tab === id ? 'panel-tab active' : 'panel-tab'}
+            onClick={() => setTab(id)}
+          >
+            {panelTabLabels[id]}
+            {id === 'lista' && devices.length > 0 && <span className="panel-tab-badge">{devices.length}</span>}
+          </button>
+        ))}
+      </nav>
+
+      <div className="panel-block" hidden={tab !== 'colocar'}>
         <p className="panel-hint">
           Escolhe um tipo e clica na planta 2D ou no modelo 3D para colocar. O piso ativo define a montagem.
         </p>
@@ -94,19 +168,11 @@ export function DevicesPanel({
           })}
         </div>
         {placementType && (
-          <label className="model-picker">
-            Modelo do {deviceLabels[placementType].toLowerCase()}
-            <select value={placementModelId} onChange={(event) => onSelectModel(event.target.value)}>
-              {modelsForType(placementType).map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.brand} &middot; {model.name}
-                </option>
-              ))}
-            </select>
-            {catalogById[placementModelId] && (
-              <span className="model-desc">{catalogById[placementModelId].description}</span>
-            )}
-          </label>
+          <div className="model-picker">
+            <span className="model-picker-title">Modelo do {deviceLabels[placementType].toLowerCase()}</span>
+            <ModelGallery type={placementType} value={placementModelId} onChange={onSelectModel} />
+            <ModelSpecSheet modelId={placementModelId} />
+          </div>
         )}
         {activeFloor === 'all' && (
           <p className="panel-hint warn">Seleciona um piso, a cobertura ou o exterior para colocar dispositivos.</p>
@@ -116,14 +182,15 @@ export function DevicesPanel({
         )}
       </div>
 
-      <div className="panel-block">
+      <div className="panel-block" hidden={tab !== 'planos'}>
         <div className="panel-header-row">
           <h3>
             <LayersIcon size={14} /> Planos de instalacao
           </h3>
         </div>
         <p className="panel-hint">
-          Modelos prontos: aplicam automaticamente uma instalacao completa ajustada as dimensoes do edificio.
+          Instalacoes completas com equipamento Milesight real, dimensionadas ao edificio e colocadas dentro das salas
+          geradas.
         </p>
         <div className="plan-list">
           {planPresets.map((preset) => (
@@ -131,6 +198,13 @@ export function DevicesPanel({
               <div className="plan-card-info">
                 <span className="plan-card-name">{preset.name}</span>
                 <span className="plan-card-desc">{preset.description}</span>
+                <span className="plan-card-bom">
+                  {preset.models.map((m) => (
+                    <span key={m} className="bom-chip">
+                      {m}
+                    </span>
+                  ))}
+                </span>
               </div>
               <button type="button" className="plan-apply-btn" onClick={() => onApplyPlan(preset)}>
                 Aplicar
@@ -140,7 +214,62 @@ export function DevicesPanel({
         </div>
       </div>
 
-      <div className="panel-block coverage-panel">
+      <div className="panel-block coverage-panel" hidden={tab !== 'vista'}>
+        {onQualidade && (
+          <div className="qualidade-bloco">
+            <span className="block-title">Qualidade grafica</span>
+            <div className="qualidade-opcoes">
+              {(Object.keys(perfisDeQualidade) as Qualidade[]).map((chave) => (
+                <button
+                  key={chave}
+                  type="button"
+                  className={chave === qualidade ? 'qualidade-btn active' : 'qualidade-btn'}
+                  onClick={() => onQualidade(chave)}
+                >
+                  {perfisDeQualidade[chave].rotulo}
+                </button>
+              ))}
+            </div>
+            <p className="panel-hint">{perfisDeQualidade[qualidade].nota}</p>
+          </div>
+        )}
+        {onToggleMapaCalor && (
+          <div className="mapa-calor-bloco">
+            <label className="switch-row">
+              <input type="checkbox" checked={mapaCalorVisivel} onChange={onToggleMapaCalor} />
+              Mapa de calor de cobertura
+            </label>
+            {mapaCalorVisivel && (
+              <>
+                <div className="escala-calor">
+                  {escalaMapaCalor.map((p) => (
+                    <span key={p.rotulo} className="escala-calor-parada">
+                      <span className="escala-calor-cor" style={{ background: p.cor }} />
+                      {p.rotulo}
+                    </span>
+                  ))}
+                </div>
+                {coberturaDoPiso ? (
+                  <div className="cobertura-resumo">
+                    <div className="cobertura-numero">
+                      <strong>{coberturaDoPiso.coberturaPct.toFixed(0)}%</strong>
+                      <span>do piso com ligacao</span>
+                    </div>
+                    {coberturaDoPiso.limitePct > 1 && (
+                      <span className="cobertura-nota">
+                        {coberturaDoPiso.limitePct.toFixed(0)}% so fecha a SF11/SF12 — lento e sujeito a colisoes
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <p className="panel-hint">
+                    Sinal que um no generico ouviria em cada ponto do piso ativo. Seleciona um piso para o ver.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        )}
         <label className="switch-row">
           <input type="checkbox" checked={coverageVisible} onChange={onToggleCoverage} />
           Mostrar cobertura de sinal
@@ -162,13 +291,19 @@ export function DevicesPanel({
           Mostrar etiquetas dos dispositivos
         </label>
         <div className="zone-legend">
-          <span className="zone-chip strong">Sinal forte</span>
-          <span className="zone-chip medium">Medio</span>
-          <span className="zone-chip weak">Fraco</span>
+          <span className="zone-chip" style={{ '--zone': sfColors[7] } as CSSProperties}>
+            SF7 rapido
+          </span>
+          <span className="zone-chip" style={{ '--zone': sfColors[9] } as CSSProperties}>
+            SF9
+          </span>
+          <span className="zone-chip" style={{ '--zone': sfColors[12] } as CSSProperties}>
+            SF12 alcance
+          </span>
         </div>
       </div>
 
-      <div className="panel-block device-list-panel">
+      <div className="panel-block device-list-panel" hidden={tab !== 'lista'}>
         <div className="panel-header-row">
           <h3>Lista de dispositivos ({devices.length})</h3>
           {devices.length > 0 && (
@@ -184,6 +319,7 @@ export function DevicesPanel({
           <ul className="device-list">
             {devices.map((device) => {
               const Icon = deviceIcons[device.type]
+              const rowModel = resolveModel(device.modelId)
               return (
                 <li key={device.id} className="device-row-item">
                   <button
@@ -191,11 +327,17 @@ export function DevicesPanel({
                     className={device.id === selectedDeviceId ? 'device-row active' : 'device-row'}
                     onClick={() => onSelectDevice(device.id)}
                   >
-                    <Icon size={15} className="device-row-icon" style={{ color: deviceColors[device.type] }} />
+                    {rowModel ? (
+                      <span className="device-row-thumb" style={{ borderColor: deviceColors[device.type] }}>
+                        <DeviceArtwork model={rowModel} size={22} />
+                      </span>
+                    ) : (
+                      <Icon size={15} className="device-row-icon" style={{ color: deviceColors[device.type] }} />
+                    )}
                     <span className="device-row-text">
                       <span className="device-row-name">{device.name}</span>
-                      {device.modelId && catalogById[device.modelId] && (
-                        <span className="device-row-model">{catalogById[device.modelId].name}</span>
+                      {resolveModel(device.modelId) && (
+                        <span className="device-row-model">{resolveModel(device.modelId)!.name}</span>
                       )}
                     </span>
                     <span className="device-row-mount">{locationLabel(device)}</span>
@@ -219,6 +361,9 @@ export function DevicesPanel({
           <DeviceInspector
             device={selectedDevice}
             building={building}
+            devices={devices}
+            propagation={propagation}
+            uplinkMinutes={uplinkMinutes}
             onUpdate={(patch) => onUpdateDevice(selectedDevice.id, patch)}
             onDelete={() => onDeleteDevice(selectedDevice.id)}
             onFocusFloor={onChangeFloor}
@@ -238,12 +383,18 @@ function locationLabel(device: DeviceItem) {
 function DeviceInspector({
   device,
   building,
+  devices,
+  propagation,
+  uplinkMinutes,
   onUpdate,
   onDelete,
   onFocusFloor,
 }: {
   device: DeviceItem
   building: BuildingConfig
+  devices: DeviceItem[]
+  propagation: Propagation
+  uplinkMinutes: number
   onUpdate: (patch: Partial<DeviceItem>) => void
   onDelete: () => void
   onFocusFloor: (floor: FloorSelector) => void
@@ -272,20 +423,25 @@ function DeviceInspector({
 
       <label>
         Modelo
-        <select
-          value={device.modelId ?? ''}
-          onChange={(event) => {
-            const model = catalogById[event.target.value]
+        <ModelPicker
+          type={device.type}
+          value={resolveModel(device.modelId)?.id ?? ''}
+          onChange={(modelId) => {
+            const model = resolveModel(modelId)
             if (model) onUpdate({ modelId: model.id, radius: model.radius })
           }}
-        >
-          {modelsForType(device.type).map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.brand} &middot; {model.name}
-            </option>
-          ))}
-        </select>
+        />
       </label>
+
+      <ModelSpecSheet modelId={device.modelId} />
+
+      <LinkBudget
+        device={device}
+        building={building}
+        devices={devices}
+        propagation={propagation}
+        uplinkMinutes={uplinkMinutes}
+      />
 
       <div className="field-grid">
         <label>
@@ -350,8 +506,12 @@ function DeviceInspector({
           onChange={(event) => onUpdate({ radius: Number(event.target.value) })}
         />
       </label>
-      <button type="button" className="link-btn" onClick={() => onUpdate({ radius: deviceDefaultRadius[device.type] })}>
-        Repor raio predefinido
+      <button
+        type="button"
+        className="link-btn"
+        onClick={() => onUpdate({ radius: resolveModel(device.modelId)?.radius ?? deviceDefaultRadius[device.type] })}
+      >
+        Repor raio do modelo
       </button>
 
       <label>
@@ -363,6 +523,159 @@ function DeviceInspector({
           placeholder="Ex: cobre armazem norte, instalar a 3m de altura..."
         />
       </label>
+    </div>
+  )
+}
+
+/**
+ * Per-device RF read-out: which gateway hears it, through how much concrete,
+ * at what spreading factor, and what that costs in airtime and battery.
+ */
+function LinkBudget({
+  device,
+  building,
+  devices,
+  propagation,
+  uplinkMinutes,
+}: {
+  device: DeviceItem
+  building: BuildingConfig
+  devices: DeviceItem[]
+  propagation: Propagation
+  uplinkMinutes: number
+}) {
+  const gateways = devices.filter((d) => d.type === 'gateway')
+  const model = resolveModel(device.modelId)
+
+  if (device.type === 'gateway') {
+    const nodes = devices.filter((d) => d.type !== 'gateway').length
+    const capacity = model?.gateway?.maxNodes ?? 0
+    return (
+      <div className="link-budget">
+        <div className="lb-head">
+          <SignalIcon size={13} /> Gateway
+        </div>
+        <div className="spec-grid">
+          <div className="spec-row">
+            <span className="spec-key">Nos no projeto</span>
+            <span className="spec-value">
+              {nodes} {capacity > 0 && `de ${capacity.toLocaleString('pt-PT')}`}
+            </span>
+          </div>
+          <div className="spec-row">
+            <span className="spec-key">Ambiente</span>
+            <span className="spec-value">
+              {model?.gateway?.environment === 'outdoor' ? 'Exterior (IP67)' : 'Interior'}
+            </span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (gateways.length === 0) {
+    return (
+      <div className="link-budget">
+        <p className="panel-hint warn">Sem gateway no projeto — nao ha ligacao para analisar.</p>
+      </div>
+    )
+  }
+
+  const link = analyseLink(device, gateways, building, propagation)
+  const battery = estimateBattery(model, link.sf, uplinkMinutes, link.payloadBytes)
+  const uplinksNeeded = 60 / Math.max(1, uplinkMinutes)
+  const overDuty = link.maxUplinksPerHour > 0 && uplinksNeeded > link.maxUplinksPerHour
+
+  return (
+    <div className="link-budget">
+      <div className="lb-head">
+        <SignalIcon size={13} /> Orcamento de ligacao
+        <span className="lb-quality" style={{ background: linkQualityColors[link.quality] }}>
+          {linkQualityLabels[link.quality]}
+        </span>
+      </div>
+
+      <div className="spec-grid">
+        <div className="spec-row">
+          <span className="spec-key">Gateway</span>
+          <span className="spec-value">{link.gatewayName ?? '—'}</span>
+        </div>
+        <div className="spec-row">
+          <span className="spec-key">Distancia</span>
+          <span className="spec-value">{link.distance.toFixed(1)} m</span>
+        </div>
+        <div className="spec-row">
+          <span className="spec-key">Obstaculos</span>
+          <span className="spec-value">
+            {link.floorsCrossed} laje(s) + {link.wallsCrossed} divisoria(s) = {Math.round(link.obstacleDb)} dB
+          </span>
+        </div>
+        <div className="spec-row">
+          <span className="spec-key">Perda total</span>
+          <span className="spec-value">{Math.round(link.pathLossDb)} dB</span>
+        </div>
+        <div className="spec-row">
+          <span className="spec-key">RSSI / SNR</span>
+          <span className="spec-value">
+            {Math.round(link.rssiDbm)} dBm / {Math.round(link.snrDb)} dB
+          </span>
+        </div>
+        <div className="spec-row">
+          <span className="spec-key">Spreading factor</span>
+          <span className="spec-value">
+            {link.sf ? (
+              <>
+                <strong style={{ color: sfColors[link.sf] }}>SF{link.sf}</strong> · margem{' '}
+                {Math.round(link.marginDb)} dB
+              </>
+            ) : (
+              <strong style={{ color: linkQualityColors['sem-cobertura'] }}>fora de alcance</strong>
+            )}
+          </span>
+        </div>
+        <div className="spec-row">
+          <span className="spec-key">Uplink</span>
+          <span className="spec-value">
+            {link.payloadBytes} B · {link.airtimeMs.toFixed(0)} ms no ar
+          </span>
+        </div>
+        <div className="spec-row">
+          <span className="spec-key">Limite de 1%</span>
+          <span className={overDuty ? 'spec-value bad' : 'spec-value'}>
+            {link.maxUplinksPerHour} msg/h (usa {uplinksNeeded.toFixed(0)})
+          </span>
+        </div>
+      </div>
+
+      {battery && (
+        <div className="battery-row">
+          <BatteryIcon size={14} />
+          <span>
+            Custo do radio: <strong>{battery.years.toFixed(1)} anos</strong> a {uplinkMinutes} min
+          </span>
+          {battery.datasheetYears && (
+            <span className="battery-ref">
+              datasheet: {battery.datasheetYears[0]}-{battery.datasheetYears[1]} anos
+            </span>
+          )}
+          <span className="battery-note">
+            So conta a energia das transmissoes — o consumo do proprio sensor (NDIR, ToF, radar) nao entra, por isso o
+            valor do datasheet e sempre o mais baixo. Serve para comparar intervalos de reporte e spreading factors.
+          </span>
+        </div>
+      )}
+
+      {link.sf === null && (
+        <p className="panel-hint warn">
+          Nenhum SF fecha o link com a margem definida. Aproxima o no do gateway, sobe-o de piso ou acrescenta um
+          gateway intermedio.
+        </p>
+      )}
+      {overDuty && (
+        <p className="panel-hint warn">
+          Este intervalo de reporte excede o ciclo de servico permitido a SF{link.sf}.
+        </p>
+      )}
     </div>
   )
 }

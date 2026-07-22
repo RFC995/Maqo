@@ -1,18 +1,66 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 
 interface DraggablePanelProps {
   title: string
   icon?: ReactNode
   defaultPosition: { x: number; y: number }
   width?: number
+  /** localStorage key; when given, position and collapsed state are remembered */
+  storageKey?: string
   children: ReactNode
 }
 
-export function DraggablePanel({ title, icon, defaultPosition, width = 320, children }: DraggablePanelProps) {
-  const [position, setPosition] = useState(defaultPosition)
-  const [collapsed, setCollapsed] = useState(false)
+interface PanelState {
+  x: number
+  y: number
+  collapsed: boolean
+}
+
+function readState(key: string | undefined): PanelState | null {
+  if (!key) return null
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as PanelState
+    if (typeof parsed?.x !== 'number' || typeof parsed?.y !== 'number') return null
+    // a window resize can leave a remembered position off screen
+    return {
+      x: Math.min(Math.max(8, parsed.x), Math.max(8, window.innerWidth - 120)),
+      y: Math.min(Math.max(8, parsed.y), Math.max(8, window.innerHeight - 60)),
+      collapsed: !!parsed.collapsed,
+    }
+  } catch {
+    return null
+  }
+}
+
+export function DraggablePanel({
+  title,
+  icon,
+  defaultPosition,
+  width = 320,
+  storageKey,
+  children,
+}: DraggablePanelProps) {
+  const [position, setPosition] = useState(() => readState(storageKey) ?? defaultPosition)
+  const [collapsed, setCollapsed] = useState(() => {
+    const saved = readState(storageKey)
+    if (saved) return saved.collapsed
+    // on a narrow screen an expanded panel covers the whole 3D view, so start
+    // out of the way and let the user open it
+    return window.innerWidth < 1450
+  })
   const panelRef = useRef<HTMLDivElement | null>(null)
   const dragState = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
+
+  useEffect(() => {
+    if (!storageKey) return
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify({ ...position, collapsed }))
+    } catch {
+      // storage unavailable - the panel just forgets between sessions
+    }
+  }, [storageKey, position, collapsed])
 
   function handlePointerDown(evt: ReactPointerEvent<HTMLDivElement>) {
     if ((evt.target as HTMLElement).closest('button')) return

@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import type { TimeOfDay } from './Scene3D'
-import { DownloadIcon, UploadIcon, SunIcon, DuskIcon, MoonIcon, TargetIcon, PlusIcon } from './icons'
+import { DownloadIcon, UploadIcon, SunIcon, DuskIcon, MoonIcon, TargetIcon, PlusIcon, ReportIcon } from './icons'
 
 interface TopBarProps {
   projectName: string
@@ -11,6 +11,7 @@ interface TopBarProps {
   onImport: (file: File) => void
   onNewProject: () => void
   onResetView: () => void
+  onRelatorio: () => void
   savedLabel: string
 }
 
@@ -29,6 +30,7 @@ export function TopBar({
   onImport,
   onNewProject,
   onResetView,
+  onRelatorio,
   savedLabel,
 }: TopBarProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -68,6 +70,11 @@ export function TopBar({
           <TargetIcon size={16} />
           <span>Vista</span>
         </button>
+        <button type="button" className="icon-btn" onClick={onRelatorio} title="Gerar relatorio de proposta">
+          <ReportIcon size={16} />
+          <span>Relatorio</span>
+        </button>
+
         <button type="button" className="icon-btn" onClick={onExport} title="Exportar projeto (.json)">
           <DownloadIcon size={16} />
           <span>Exportar</span>

@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="pt">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>Ativar o Maqo</title>
+    <style>
+      :root {
+        --bg: #070b14;
+        --surface: rgba(20, 28, 44, 0.72);
+        --border: rgba(120, 140, 175, 0.18);
+        --text: #eef2f9;
+        --muted: #97a3ba;
+        --faint: #64708a;
+        --accent: #35c7f0;
+        --danger: #f87171;
+        --ok: #4ade80;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 34px 30px;
+        background:
+          radial-gradient(900px 500px at 15% -10%, rgba(109, 139, 255, 0.16), transparent 60%),
+          radial-gradient(700px 500px at 110% 110%, rgba(53, 199, 240, 0.12), transparent 60%),
+          var(--bg);
+        color: var(--text);
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        user-select: none;
+      }
+      .cartao { width: 100%; max-width: 460px; }
+      .marca {
+        display: flex; align-items: center; gap: 11px; margin-bottom: 26px;
+      }
+      .marca-nome {
+        font-size: 1.5rem; font-weight: 800; letter-spacing: -0.02em;
+        background: linear-gradient(120deg, #35c7f0, #6d8bff);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+      }
+      h1 { font-size: 1.05rem; font-weight: 700; margin: 0 0 8px; }
+      p.intro { font-size: 0.84rem; line-height: 1.55; color: var(--muted); margin: 0 0 20px; }
+      label { display: block; font-size: 0.72rem; font-weight: 650; color: var(--muted); margin-bottom: 7px; }
+      textarea {
+        width: 100%; height: 132px; resize: vertical;
+        padding: 12px 13px; border-radius: 11px;
+        border: 1px solid var(--border); background: rgba(8, 13, 24, 0.7);
+        color: var(--text); font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+        font-size: 0.76rem; line-height: 1.55; letter-spacing: 0.01em;
+        user-select: text;
+      }
+      textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(53, 199, 240, 0.16); }
+      button {
+        width: 100%; margin-top: 16px; padding: 12px 16px;
+        border: none; border-radius: 11px; cursor: pointer;
+        background: linear-gradient(120deg, #35c7f0, #6d8bff); color: #06121d;
+        font-size: 0.88rem; font-weight: 750; font-family: inherit;
+        transition: transform 0.15s ease, filter 0.15s ease;
+      }
+      button:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.07); }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .aviso {
+        margin-top: 15px; padding: 11px 13px; border-radius: 10px;
+        font-size: 0.78rem; line-height: 1.5; display: none;
+      }
+      .aviso.erro { display: block; color: var(--danger); background: rgba(248, 113, 113, 0.1); border: 1px solid rgba(248, 113, 113, 0.32); }
+      .aviso.ok { display: block; color: var(--ok); background: rgba(74, 222, 128, 0.1); border: 1px solid rgba(74, 222, 128, 0.32); }
+      .rodape { margin-top: 24px; font-size: 0.72rem; line-height: 1.55; color: var(--faint); }
+    </style>
+  </head>
+  <body>
+    <div class="cartao">
+      <div class="marca">
+        <svg width="26" height="26" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+          <rect x="6" y="11" width="20" height="18" rx="2" fill="#6d8bff" opacity="0.9" />
+          <path d="M10 15h3v3h-3zM15 15h3v3h-3zM20 15h3v3h-3zM10 21h3v3h-3zM15 21h3v3h-3zM20 21h3v3h-3z" fill="#070b14" />
+          <path d="M16 9V4" stroke="#35c7f0" stroke-width="2" stroke-linecap="round" />
+          <path d="M11.5 6.5a6.4 6.4 0 0 1 9 0" stroke="#35c7f0" stroke-width="2" stroke-linecap="round" fill="none" />
+        </svg>
+        <span class="marca-nome">Maqo</span>
+      </div>
+
+      <h1>Ativar a aplicacao</h1>
+      <p class="intro">
+        Cola a chave de licenca que recebeste. Fica guardada nesta maquina &mdash; so precisas de o fazer uma vez.
+      </p>
+
+      <label for="chave">Chave de licenca</label>
+      <textarea id="chave" spellcheck="false" autocomplete="off" placeholder="eyJ2IjoxLCJpZCI6..."></textarea>
+
+      <button id="ativar" type="button">Ativar</button>
+      <div class="aviso" id="aviso"></div>
+
+      <p class="rodape">
+        Sem chave? Pede uma a quem te forneceu o Maqo. Cada chave e emitida para um cliente e pode ter validade.
+      </p>
+    </div>
+
+    <script>
+      const campo = document.getElementById('chave')
+      const botao = document.getElementById('ativar')
+      const aviso = document.getElementById('aviso')
+
+      function mostrar(texto, tipo) {
+        aviso.textContent = texto
+        aviso.className = 'aviso ' + tipo
+      }
+
+      async function ativar() {
+        const chave = campo.value.trim()
+        if (!chave) {
+          mostrar('Cola primeiro a chave.', 'erro')
+          campo.focus()
+          return
+        }
+        botao.disabled = true
+        botao.textContent = 'A verificar...'
+        try {
+          const resultado = await window.maqo.ativarLicenca(chave)
+          if (resultado.ok) {
+            mostrar('Licenca valida. A abrir o Maqo...', 'ok')
+            botao.textContent = 'Ativado'
+            return
+          }
+          mostrar(resultado.motivo, 'erro')
+        } catch (erro) {
+          mostrar('Falha a verificar a chave: ' + erro.message, 'erro')
+        }
+        botao.disabled = false
+        botao.textContent = 'Ativar'
+      }
+
+      botao.addEventListener('click', ativar)
+      campo.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) ativar()
+      })
+      campo.focus()
+    </script>
+  </body>
+</html>

@@ -171,3 +171,32 @@ export function BuildingIcon({ size, className, style }: IconProps) {
     </svg>
   )
 }
+
+export function SignalIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <path d="M4 20v-4M9 20v-8M14 20V8M19 20V4" />
+    </svg>
+  )
+}
+
+export function BatteryIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <rect x="2" y="8" width="16" height="9" rx="2" />
+      <path d="M21 11v3" />
+      <path d="M5.5 11v3M9 11v3" />
+    </svg>
+  )
+}
+
+export function ReportIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+      <path d="M14 3v5h5" />
+      <path d="M9 13h6M9 17h4" />
+    </svg>
+  )
+}
+

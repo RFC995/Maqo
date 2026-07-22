@@ -1,41 +1,11 @@
-import type { BuildingConfig } from './types'
+import type { BuildingConfig, Project, Room, RoomKind } from './types'
+import { roomKindLabels } from './types'
 import { createRng } from './buildingGenerator'
+import type { Measurement } from './catalog'
+import { primaryMeasurements, readingStatus, sensorReading, type ReadingStatus } from './telemetry'
 
-export type RoomKind =
-  | 'rececao'
-  | 'refeitorio'
-  | 'openspace'
-  | 'reuniao'
-  | 'escritorio'
-  | 'direcao'
-  | 'armazem'
-  | 'arquivo'
-  | 'copa'
-
-export interface Room {
-  id: string
-  kind: RoomKind
-  name: string
-  /** center, local building coords */
-  x: number
-  z: number
-  width: number
-  depth: number
-  /** which side the door faces: +1 door on -z wall (towards corridor at z>room), -1 door on +z wall */
-  doorSide: 1 | -1
-}
-
-export const roomKindLabels: Record<RoomKind, string> = {
-  rececao: 'Rececao',
-  refeitorio: 'Refeitorio',
-  openspace: 'Open Space',
-  reuniao: 'Sala de Reuniao',
-  escritorio: 'Escritorio',
-  direcao: 'Direcao',
-  armazem: 'Armazem',
-  arquivo: 'Arquivo',
-  copa: 'Copa',
-}
+export type { Room, RoomKind }
+export { roomKindLabels }
 
 const groundFloorPool: RoomKind[] = ['rececao', 'refeitorio', 'openspace', 'armazem', 'reuniao', 'copa']
 const upperFloorPool: RoomKind[] = ['openspace', 'escritorio', 'reuniao', 'direcao', 'escritorio', 'arquivo']
@@ -107,13 +77,68 @@ export function generateRooms(building: BuildingConfig, floorIndex: number, seed
   return rooms
 }
 
+/**
+ * The rooms in force for a floor: the user's saved layout when there is one,
+ * otherwise the procedural layout for the current seed.
+ */
+export function resolveRooms(project: Project, floorIndex: number): Room[] {
+  const saved = project.rooms?.[String(floorIndex)]
+  if (saved) return saved
+  return generateRooms(project.building, floorIndex, project.seed)
+}
+
+export function isFloorCustomised(project: Project, floorIndex: number): boolean {
+  return project.rooms?.[String(floorIndex)] !== undefined
+}
+
+/** A new room dropped in the middle of the floor, ready to be dragged. */
+export function createRoom(building: BuildingConfig, existing: Room[]): Room {
+  const width = Math.min(6, building.width * 0.3)
+  const depth = Math.min(5, building.depth * 0.3)
+  return {
+    id: `room-${crypto.randomUUID().slice(0, 8)}`,
+    kind: 'escritorio',
+    name: `${roomKindLabels.escritorio} ${existing.length + 1}`,
+    x: 0,
+    z: 0,
+    width,
+    depth,
+    doorSide: 1,
+  }
+}
+
+/** Keeps a room inside the building footprint after a move or a resize. */
+export function clampRoom(room: Room, building: BuildingConfig): Room {
+  const inset = 0.45
+  const maxW = building.width - inset * 2
+  const maxD = building.depth - inset * 2
+  const width = Math.max(1.5, Math.min(room.width, maxW))
+  const depth = Math.max(1.5, Math.min(room.depth, maxD))
+  const limitX = (maxW - width) / 2
+  const limitZ = (maxD - depth) / 2
+  return {
+    ...room,
+    width,
+    depth,
+    x: Math.max(-limitX, Math.min(limitX, room.x)),
+    z: Math.max(-limitZ, Math.min(limitZ, room.z)),
+  }
+}
+
 export type RoomStatus = 'cool' | 'normal' | 'warm' | 'hot' | 'nodata'
 
 export interface SensorSource {
   sensorId: string
-  measuresTemp: boolean
-  measuresHumidity: boolean
-  measuresCo2: boolean
+  /** what the model placed in this room can actually measure */
+  measures: Measurement[]
+}
+
+export interface RoomReading {
+  measurement: Measurement
+  value: number
+  status: ReadingStatus
+  /** how many sensors in the room contribute to this reading */
+  sources: number
 }
 
 export interface RoomClimate {
@@ -125,15 +150,8 @@ export interface RoomClimate {
   min24: number | null
   max24: number | null
   status: RoomStatus
-}
-
-function hash01(text: string) {
-  let h = 2166136261
-  for (let i = 0; i < text.length; i += 1) {
-    h ^= text.charCodeAt(i)
-    h = Math.imul(h, 16777619)
-  }
-  return ((h >>> 0) % 10000) / 10000
+  /** every measurement the room's sensors report, in display order */
+  readings: RoomReading[]
 }
 
 const NO_DATA: RoomClimate = {
@@ -145,61 +163,50 @@ const NO_DATA: RoomClimate = {
   min24: null,
   max24: null,
   status: 'nodata',
+  readings: [],
 }
 
-/** Simulated live reading for one sensor, deterministic per id + tick. */
-function sensorTemperature(sensorId: string, tick: number) {
-  const h = hash01(sensorId)
-  const base = 21.2 + h * 3.4
-  const wave = Math.sin(tick * 0.35 + h * 12.6) * 0.7 + Math.sin(tick * 0.11 + h * 5.1) * 0.4
-  return base + wave
+/** Averages one measurement across every sensor in the room that supports it. */
+function average(sources: SensorSource[], measurement: Measurement, tick: number) {
+  const capable = sources.filter((s) => s.measures.includes(measurement))
+  if (capable.length === 0) return null
+  let sum = 0
+  let count = 0
+  for (const source of capable) {
+    const value = sensorReading(measurement, source.sensorId, tick)
+    if (value !== null) {
+      sum += value
+      count += 1
+    }
+  }
+  return count === 0 ? null : { value: sum / count, sources: count }
 }
 
 /**
- * A room's environment comes ONLY from the sensors placed inside it. With no
- * temperature-capable sensor the room reports "sem dados".
+ * A room's environment comes ONLY from the sensors physically placed inside it.
+ * With no temperature-capable model in the room, it reports "sem dados".
  */
 export function roomClimateFromSensors(sources: SensorSource[], tick: number): RoomClimate {
-  const tempSources = sources.filter((s) => s.measuresTemp)
-  if (tempSources.length === 0) {
+  const temp = average(sources, 'temperatura', tick)
+  if (!temp) {
     return { ...NO_DATA, sensorCount: sources.length }
   }
 
-  let tempSum = 0
-  let minSum = 0
-  let maxSum = 0
-  for (const source of tempSources) {
-    const h = hash01(source.sensorId)
-    const t = sensorTemperature(source.sensorId, tick)
-    tempSum += t
-    minSum += 21.2 + h * 3.4 - 1.1 - h * 0.9
-    maxSum += 21.2 + h * 3.4 + 1.2 + h * 0.8
-  }
-  const temperature = tempSum / tempSources.length
-  const min24 = minSum / tempSources.length
-  const max24 = maxSum / tempSources.length
-
-  const humSources = sources.filter((s) => s.measuresHumidity)
-  let humidity: number | null = null
-  if (humSources.length > 0) {
-    let humSum = 0
-    for (const source of humSources) {
-      const h = hash01(source.sensorId + 'h')
-      humSum += 40 + h * 18 + Math.sin(tick * 0.22 + h * 8.2) * 4
-    }
-    humidity = humSum / humSources.length
+  const readings: RoomReading[] = []
+  for (const measurement of primaryMeasurements) {
+    const agg = average(sources, measurement, tick)
+    if (!agg) continue
+    const value = Math.round(agg.value * 100) / 100
+    readings.push({ measurement, value, status: readingStatus(measurement, value), sources: agg.sources })
   }
 
-  const co2Sources = sources.filter((s) => s.measuresCo2)
-  let co2: number | null = null
-  if (co2Sources.length > 0) {
-    let co2Sum = 0
-    for (const source of co2Sources) {
-      const h = hash01(source.sensorId + 'c')
-      co2Sum += 480 + h * 320 + Math.sin(tick * 0.18 + h * 3.3) * 60
-    }
-    co2 = co2Sum / co2Sources.length
-  }
+  const temperature = temp.value
+  const humidity = average(sources, 'humidade', tick)?.value ?? null
+  const co2 = average(sources, 'co2', tick)?.value ?? null
+
+  // 24 h band, derived from the same deterministic wave the live value rides on
+  const min24 = temperature - 1.4
+  const max24 = temperature + 1.6
 
   const status: RoomStatus =
     temperature >= 25.2 ? 'hot' : temperature >= 23.6 ? 'warm' : temperature <= 20.2 ? 'cool' : 'normal'
@@ -213,6 +220,7 @@ export function roomClimateFromSensors(sources: SensorSource[], tick: number): R
     min24: Math.round(min24 * 10) / 10,
     max24: Math.round(max24 * 10) / 10,
     status,
+    readings,
   }
 }
 

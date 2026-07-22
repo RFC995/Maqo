@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls, Sky, Stars, ContactShadows, Environment, Lightformer, SoftShadows } from '@react-three/drei'
 import {
@@ -7,7 +7,7 @@ import {
   N8AO,
   ToneMapping,
   Vignette,
-  SMAA,
+
   BrightnessContrast,
   HueSaturation,
 } from '@react-three/postprocessing'
@@ -20,7 +20,11 @@ import type { Room, SensorSource } from '../rooms'
 import { BuildingModel } from './Building'
 import { Site } from './Site'
 import { DeviceMarkers } from './DeviceMarkers'
+import { defaultPropagation as defaultPropagationRf, type Propagation } from '../rf'
 import { InteriorFloor } from './Interior'
+import { perfisDeQualidade, type PerfilQualidade, type Qualidade } from '../qualidade'
+import { registarCaptura } from '../captura'
+import { calcularMapaCalor, desenharMapaCalor } from '../heatmap'
 
 export type TimeOfDay = 'day' | 'dusk' | 'night'
 
@@ -31,8 +35,11 @@ interface Scene3DProps {
   selectedDeviceId: string | null
   activeFloor: FloorSelector
   timeOfDay: TimeOfDay
+  qualidade?: Qualidade
+  mapaCalorVisivel?: boolean
   placementMode: boolean
   coverageVisible: boolean
+  propagation?: Propagation
   coverageOpacity: number
   labelsVisible: boolean
   resetSignal: number
@@ -264,8 +271,11 @@ export function Scene3D({
   selectedDeviceId,
   activeFloor,
   timeOfDay,
+  qualidade = 'equilibrado',
+  mapaCalorVisivel = false,
   placementMode,
   coverageVisible,
+  propagation,
   coverageOpacity,
   labelsVisible,
   resetSignal,
@@ -278,6 +288,7 @@ export function Scene3D({
   onPlaceGround,
 }: Scene3DProps) {
   const preset = lightPresets[timeOfDay]
+  const perfil = perfisDeQualidade[qualidade]
   const maxCoverageRadius = devices.reduce(
     (acc, d) => (d.type === 'gateway' || d.type === 'repeater' ? Math.max(acc, d.radius) : acc),
     0,
@@ -289,8 +300,9 @@ export function Scene3D({
     <Canvas
       flat
       shadows
-      dpr={[1, 2]}
-      gl={{ antialias: true, powerPreference: 'high-performance' }}
+      dpr={perfil.dpr}
+      // preserveDrawingBuffer keeps the frame readable for the report snapshot
+      gl={{ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true }}
       onCreated={({ gl }) => {
         gl.toneMappingExposure = 1.05
       }}
@@ -299,16 +311,18 @@ export function Scene3D({
       <color attach="background" args={[preset.background]} />
       <fog attach="fog" args={[preset.fog, preset.fogNear, preset.fogFar]} />
 
-      <SoftShadows size={26} samples={16} focus={0.35} />
+      {perfil.softShadows !== null && <SoftShadows size={26} samples={perfil.softShadows} focus={0.35} />}
 
       <hemisphereLight args={[preset.hemiSky, preset.hemiGround, preset.hemiIntensity]} />
       <ambientLight intensity={preset.ambient} />
+      {/* Shadow map at 2048 rather than 4096: a quarter of the memory and a far
+          faster first shadow pass, with no visible difference at this scale. */}
       <directionalLight
         position={preset.sun}
         color={preset.sunColor}
         intensity={preset.sunIntensity}
         castShadow
-        shadow-mapSize={[4096, 4096]}
+        shadow-mapSize={[perfil.sombras, perfil.sombras]}
         shadow-camera-left={-shadowSpan}
         shadow-camera-right={shadowSpan}
         shadow-camera-top={shadowSpan}
@@ -331,7 +345,7 @@ export function Scene3D({
           mieDirectionalG={preset.skyMieDirectionalG}
         />
       )}
-      {preset.showStars && <Stars radius={200} depth={60} count={2600} factor={3.4} fade speed={0.4} />}
+      {preset.showStars && perfil.estrelas && <Stars radius={200} depth={60} count={2600} factor={3.4} fade speed={0.4} />}
 
       <SceneEnvironment timeOfDay={timeOfDay} preset={preset} sun={preset.sun} />
 
@@ -353,6 +367,7 @@ export function Scene3D({
         selectedId={selectedDeviceId}
         visibleFloor={activeFloor === 'roof' || activeFloor === 'ground' ? activeFloor : typeof activeFloor === 'number' ? activeFloor : 'all'}
         coverageVisible={coverageVisible}
+        propagation={propagation}
         coverageOpacity={coverageOpacity}
         labelsVisible={labelsVisible}
         onSelect={onSelectDevice}
@@ -371,22 +386,151 @@ export function Scene3D({
 
       <CameraRig building={building} activeFloor={activeFloor} resetSignal={resetSignal} />
 
-      <EffectComposer multisampling={0} enableNormalPass>
-        <N8AO aoRadius={2.4} intensity={preset.aoIntensity} distanceFalloff={1} color="#050810" quality="high" />
-        <Bloom
-          mipmapBlur
-          luminanceThreshold={preset.bloomThreshold}
-          luminanceSmoothing={0.28}
-          intensity={preset.bloomIntensity}
-          radius={0.72}
+      {mapaCalorVisivel && typeof activeFloor === 'number' && (
+        <MapaCalorNoPiso
+          building={building}
+          floorIndex={activeFloor}
+          devices={devices}
+          propagation={propagation ?? defaultPropagationRf}
         />
-        <ToneMapping mode={ToneMappingMode.AGX} />
-        <HueSaturation saturation={preset.grade.saturation} hue={0} />
-        <BrightnessContrast brightness={preset.grade.brightness} contrast={preset.grade.contrast} />
-        <Vignette eskil={false} offset={0.2} darkness={0.62} />
-        <SMAA />
-      </EffectComposer>
+      )}
+      <PosProcessamento preset={preset} perfil={perfil} />
+      <RegistoDeCaptura />
     </Canvas>
+  )
+}
+
+/**
+ * The coverage field laid on the floor slab. Painted to a canvas at one pixel
+ * per sample and stretched with linear filtering, which reads as a smooth field
+ * rather than a grid of cells.
+ */
+function MapaCalorNoPiso({
+  building,
+  floorIndex,
+  devices,
+  propagation,
+}: {
+  building: BuildingConfig
+  floorIndex: number
+  devices: DeviceItem[]
+  propagation: Propagation
+}) {
+  const textura = useMemo(() => {
+    const mapa = calcularMapaCalor(building, floorIndex, devices, propagation)
+    const t = new THREE.CanvasTexture(desenharMapaCalor(mapa, 1))
+    t.colorSpace = THREE.SRGBColorSpace
+    t.minFilter = THREE.LinearFilter
+    t.magFilter = THREE.LinearFilter
+    return t
+  }, [building, floorIndex, devices, propagation])
+
+  useEffect(() => () => textura.dispose(), [textura])
+
+  const y = floorIndex * building.floorHeight + 0.06
+
+  return (
+    <mesh position={[0, y, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={2}>
+      <planeGeometry args={[building.width, building.depth]} />
+      <meshBasicMaterial map={textura} transparent opacity={0.62} depthWrite={false} />
+    </mesh>
+  )
+}
+
+/**
+ * Publishes a snapshot function for the report. The canvas is created with
+ * `preserveDrawingBuffer` so the pixels are still readable when the report asks
+ * for them, rather than having been discarded after compositing.
+ */
+function RegistoDeCaptura() {
+  const gl = useThree((estado) => estado.gl)
+
+  useEffect(() => {
+    registarCaptura(() => gl.domElement.toDataURL('image/png'))
+    return () => registarCaptura(null)
+  }, [gl])
+
+  return null
+}
+
+/**
+ * The effect pipeline is the single most expensive thing to bring up: N8AO,
+ * Bloom and SMAA each compile their own programs, and profiling showed shader
+ * linking dominating startup. Mounting it a few frames late lets the building
+ * appear almost immediately and the grade settle in right after.
+ *
+ * Until it takes over, the renderer does its own AGX tone mapping, so those
+ * first frames are graded rather than washed out.
+ */
+function PosProcessamento({
+  preset,
+  perfil,
+}: {
+  preset: (typeof lightPresets)['day']
+  perfil: PerfilQualidade
+}) {
+  const gl = useThree((estado) => estado.gl)
+  const [ativo, setAtivo] = useState(false)
+
+  useEffect(() => {
+    // with no composer the renderer must grade the image itself, otherwise the
+    // scene renders flat and washed out
+    if (!perfil.posProcessamento) {
+      gl.toneMapping = THREE.AgXToneMapping
+      setAtivo(false)
+      return
+    }
+    if (ativo) return
+    gl.toneMapping = THREE.AgXToneMapping
+
+    let frames = 0
+    let pedido = 0
+    const passo = () => {
+      frames += 1
+      if (frames >= 3) {
+        // hand tone mapping over to the composer's own AGX pass
+        gl.toneMapping = THREE.NoToneMapping
+        setAtivo(true)
+        return
+      }
+      pedido = requestAnimationFrame(passo)
+    }
+    pedido = requestAnimationFrame(passo)
+    return () => cancelAnimationFrame(pedido)
+  }, [gl, ativo, perfil.posProcessamento])
+
+  if (!ativo) return null
+
+  return (
+    /*
+     * Two deliberate swaps against the previous "maximum quality" pipeline,
+     * both measured:
+     *  - no normal pass. It re-rendered the whole scene into a normal buffer,
+     *    which meant compiling a normal-material variant of every material in
+     *    the scene. N8AO reconstructs normals from depth instead.
+     *  - hardware MSAA instead of SMAA. SMAA compiles three extra passes plus
+     *    lookup textures; 4x MSAA is done by the GPU with no shader to build.
+     */
+    <EffectComposer multisampling={4}>
+      {/* EffectComposer types its children as elements, so an unwanted pass is
+          swapped for a transparent one rather than conditioned away. */}
+      {perfil.ambientOcclusion ? (
+        <N8AO aoRadius={2.4} intensity={preset.aoIntensity} distanceFalloff={1} color="#050810" quality="medium" />
+      ) : (
+        <Vignette eskil={false} offset={1} darkness={0} />
+      )}
+      <Bloom
+        mipmapBlur
+        luminanceThreshold={preset.bloomThreshold}
+        luminanceSmoothing={0.28}
+        intensity={preset.bloomIntensity}
+        radius={0.72}
+      />
+      <ToneMapping mode={ToneMappingMode.AGX} />
+      <HueSaturation saturation={preset.grade.saturation} hue={0} />
+      <BrightnessContrast brightness={preset.grade.brightness} contrast={preset.grade.contrast} />
+      <Vignette eskil={false} offset={0.2} darkness={0.62} />
+    </EffectComposer>
   )
 }
 

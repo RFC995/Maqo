@@ -30,11 +30,59 @@ export interface DeviceItem {
   notes: string
 }
 
+export type RoomKind =
+  | 'rececao'
+  | 'refeitorio'
+  | 'openspace'
+  | 'reuniao'
+  | 'escritorio'
+  | 'direcao'
+  | 'armazem'
+  | 'arquivo'
+  | 'copa'
+  | 'sanitarios'
+  | 'tecnica'
+  | 'corredor'
+
+export const roomKindLabels: Record<RoomKind, string> = {
+  rececao: 'Rececao',
+  refeitorio: 'Refeitorio',
+  openspace: 'Open Space',
+  reuniao: 'Sala de Reuniao',
+  escritorio: 'Escritorio',
+  direcao: 'Direcao',
+  armazem: 'Armazem',
+  arquivo: 'Arquivo',
+  copa: 'Copa',
+  sanitarios: 'Sanitarios',
+  tecnica: 'Sala Tecnica',
+  corredor: 'Corredor',
+}
+
+export interface Room {
+  id: string
+  kind: RoomKind
+  name: string
+  /** centre, in local building coordinates */
+  x: number
+  z: number
+  width: number
+  depth: number
+  /** which wall the door sits on: 1 = towards -z, -1 = towards +z */
+  doorSide: 1 | -1
+}
+
 export interface Project {
   version: 1
   id: string
   building: BuildingConfig
   devices: DeviceItem[]
+  /**
+   * Per-floor room layout, keyed by floor index. A floor absent from here is
+   * still auto-generated from the seed; it is copied in here the moment the
+   * user edits it, so hand-made layouts survive a reseed.
+   */
+  rooms?: Record<string, Room[]>
   seed: number
   updatedAt: string
 }

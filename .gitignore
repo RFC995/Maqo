@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Electron build output
+release
+
+# NUNCA versionar: assina todas as licencas do produto.
+# Se isto vazar, qualquer pessoa pode emitir chaves validas.
+chave-privada.pem
+licencas-emitidas.log

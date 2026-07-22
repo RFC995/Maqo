@@ -1,17 +1,11 @@
 import { Billboard, Html } from '@react-three/drei'
 import type { ThreeEvent } from '@react-three/fiber'
-import { catalogById } from '../catalog'
+import { resolveModel } from '../catalog'
+import { deviceWorldYFor } from '../geometry'
+import { coverageRings, dataRate, defaultPropagation, type Propagation } from '../rf'
 import { deviceColors, type BuildingConfig, type DeviceItem, type DeviceType } from '../types'
 
-export function deviceWorldY(device: DeviceItem, building: BuildingConfig) {
-  if (device.mount === 'roof') return building.floors * building.floorHeight + 0.35
-  if (device.mount === 'ground') return 0.05
-  const floor = device.floor ?? 0
-  return floor * building.floorHeight + building.floorHeight * 0.55
-}
-
-export const zoneColors = ['#22c55e', '#eab308', '#ef4444'] as const
-export const zoneFractions = [0.33, 0.66, 1] as const
+export const deviceWorldY = deviceWorldYFor
 
 interface DeviceMarkersProps {
   devices: DeviceItem[]
@@ -21,6 +15,7 @@ interface DeviceMarkersProps {
   coverageVisible: boolean
   coverageOpacity: number
   labelsVisible: boolean
+  propagation?: Propagation
   onSelect: (id: string) => void
 }
 
@@ -32,6 +27,7 @@ export function DeviceMarkers({
   coverageVisible,
   coverageOpacity,
   labelsVisible,
+  propagation = defaultPropagation,
   onSelect,
 }: DeviceMarkersProps) {
   return (
@@ -55,6 +51,7 @@ export function DeviceMarkers({
             coverageVisible={coverageVisible}
             coverageOpacity={coverageOpacity}
             labelVisible={labelsVisible && !dimmed}
+            propagation={propagation}
             onSelect={onSelect}
           />
         )
@@ -77,6 +74,7 @@ function DeviceMarker({
   coverageVisible,
   coverageOpacity,
   labelVisible,
+  propagation,
   onSelect,
 }: {
   device: DeviceItem
@@ -86,6 +84,7 @@ function DeviceMarker({
   coverageVisible: boolean
   coverageOpacity: number
   labelVisible: boolean
+  propagation: Propagation
   onSelect: (id: string) => void
 }) {
   const y = deviceWorldY(device, building)
@@ -138,17 +137,24 @@ function DeviceMarker({
       )}
 
       {labelVisible && (
+        /*
+         * Compact by default — a dense floor plan puts dozens of these on
+         * screen at once and full names turned the building into a wall of
+         * overlapping chips. The selected device gets the full detail.
+         */
         <Html center distanceFactor={38} position={[0, 1.05, 0]} zIndexRange={[15, 0]} style={{ pointerEvents: 'none' }}>
-          <div className={selected ? 'device-label selected' : 'device-label'} style={{ borderColor: color }}>
+          <div className={selected ? 'device-label selected' : 'device-label compact'} style={{ borderColor: color }}>
             <span className="device-label-dot" style={{ background: color }} />
-            <span className="device-label-text">
-              <span className="device-label-name">{device.name}</span>
-              <span className="device-label-meta">
-                {device.modelId && catalogById[device.modelId]
-                  ? catalogById[device.modelId].name
-                  : `${locationLabel(device)} · R ${device.radius} m`}
+            {selected ? (
+              <span className="device-label-text">
+                <span className="device-label-name">{device.name}</span>
+                <span className="device-label-meta">
+                  {resolveModel(device.modelId)?.name ?? `${locationLabel(device)} · R ${device.radius} m`}
+                </span>
               </span>
-            </span>
+            ) : (
+              <span className="device-label-code">{resolveModel(device.modelId)?.model ?? device.name}</span>
+            )}
           </div>
         </Html>
       )}
@@ -161,7 +167,14 @@ function DeviceMarker({
       )}
 
       {coverageVisible && !dimmed && (
-        <CoverageShape device={device} groundOffset={-y} opacity={coverageOpacity} color={color} />
+        <CoverageShape
+          device={device}
+          groundOffset={-y}
+          opacity={coverageOpacity}
+          color={color}
+          propagation={propagation}
+          selected={selected}
+        />
       )}
     </group>
   )
@@ -181,20 +194,25 @@ function DeviceShape({ type }: { type: DeviceType }) {
 }
 
 /**
- * LoRaWAN-style RF planning rings projected on the ground: three concentric
- * zones (strong / medium / weak) for gateways and repeaters, a simple disc for
- * sensors and a view cone for cameras.
+ * RF planning footprint projected on the ground. For gateways the rings are the
+ * real per-spreading-factor ranges from the EU868 link budget (SF7 fast/close
+ * out to SF12 slow/far), so the picture changes with the propagation model
+ * rather than being a fixed fraction of an arbitrary radius.
  */
 function CoverageShape({
   device,
   groundOffset,
   opacity,
   color,
+  propagation,
+  selected,
 }: {
   device: DeviceItem
   groundOffset: number
   opacity: number
   color: string
+  propagation: Propagation
+  selected: boolean
 }) {
   const radius = device.radius
 
@@ -222,29 +240,61 @@ function CoverageShape({
     )
   }
 
+  // repeaters and other non-gateway radios keep a single planning disc
+  if (device.type !== 'gateway') {
+    return (
+      <group position={[0, groundOffset + 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <mesh>
+          <circleGeometry args={[radius, 56]} />
+          <meshBasicMaterial color={color} transparent opacity={opacity * 0.8} depthWrite={false} />
+        </mesh>
+        <mesh>
+          <ringGeometry args={[radius * 0.99, radius, 56]} />
+          <meshBasicMaterial color={color} transparent opacity={Math.min(0.85, opacity * 4)} depthWrite={false} />
+        </mesh>
+      </group>
+    )
+  }
+
+  const rings = coverageRings(device, propagation)
+
   return (
     <group position={[0, groundOffset, 0]}>
-      {zoneFractions.map((fraction, i) => {
-        const inner = i === 0 ? 0 : radius * zoneFractions[i - 1]
-        const outer = radius * fraction
+      {rings.map((ring, i) => {
+        const inner = i === 0 ? 0 : rings[i - 1].drawRadius
+        if (ring.drawRadius <= inner) return null
         return (
-          <group key={i} position={[0, 0.05 + i * 0.015, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <group key={ring.sf} position={[0, 0.05 + (rings.length - i) * 0.015, 0]} rotation={[-Math.PI / 2, 0, 0]}>
             <mesh>
-              <ringGeometry args={[inner, outer, 72]} />
-              <meshBasicMaterial
-                color={zoneColors[i]}
-                transparent
-                opacity={opacity * (1.15 - i * 0.3)}
-                depthWrite={false}
-              />
+              <ringGeometry args={[inner, ring.drawRadius, 96]} />
+              <meshBasicMaterial color={ring.color} transparent opacity={opacity * (1.15 - i * 0.28)} depthWrite={false} />
             </mesh>
             <mesh>
-              <ringGeometry args={[outer * 0.995, outer, 72]} />
-              <meshBasicMaterial color={zoneColors[i]} transparent opacity={Math.min(0.9, opacity * 4.5)} depthWrite={false} />
+              <ringGeometry args={[ring.drawRadius * 0.996, ring.drawRadius, 96]} />
+              <meshBasicMaterial color={ring.color} transparent opacity={Math.min(0.9, opacity * 4.5)} depthWrite={false} />
             </mesh>
           </group>
         )
       })}
+      {/* ring read-outs only for the gateway being inspected, else every
+          gateway adds three more floating chips to the scene */}
+      {selected &&
+        rings.map((ring, i) => (
+          <Html
+            key={`sf-${ring.sf}`}
+            center
+            distanceFactor={60}
+            position={[0, 0.2 + i * 0.02, ring.drawRadius * -0.72]}
+            zIndexRange={[10, 0]}
+            style={{ pointerEvents: 'none' }}
+          >
+            <div className="sf-ring-label" style={{ borderColor: ring.color, color: ring.color }}>
+              SF{ring.sf} · {ring.clamped ? '>' : ''}
+              {ring.radius >= 1000 ? `${(ring.radius / 1000).toFixed(1)} km` : `${Math.round(ring.radius)} m`} ·{' '}
+              {(dataRate[ring.sf].bps / 1000).toFixed(2)} kbps
+            </div>
+          </Html>
+        ))}
     </group>
   )
 }

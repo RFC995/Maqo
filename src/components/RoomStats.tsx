@@ -1,4 +1,6 @@
 import { roomClimateFromSensors, statusColors, type Room, type SensorSource } from '../rooms'
+import { measurementLabels } from '../catalog'
+import { formatReading, readingStatusColors } from '../telemetry'
 
 interface RoomStatsProps {
   rooms: Room[]
@@ -32,12 +34,22 @@ export function RoomStats({ rooms, telemetryTick, sensorsByRoom, floorLabel }: R
                 <div className="room-card-body">
                   <Gauge value={climate.temperature!} color={color} />
                   <div className="room-card-metrics">
-                    <span className="metric-line">Min: {climate.min24!.toFixed(1)} &deg;C</span>
-                    <span className="metric-line">Max: {climate.max24!.toFixed(1)} &deg;C</span>
-                    {climate.humidity !== null && <span className="metric-line">Hum: {climate.humidity.toFixed(0)} %</span>}
-                    {climate.co2 !== null && <span className="metric-line">CO2: {climate.co2} ppm</span>}
+                    {climate.readings
+                      .filter((r) => r.measurement !== 'temperatura')
+                      .map((reading) => (
+                        <span key={reading.measurement} className="metric-line">
+                          <span
+                            className="metric-dot"
+                            style={{ background: readingStatusColors[reading.status] }}
+                            title={`Estado: ${reading.status}`}
+                          />
+                          {measurementLabels[reading.measurement]}:{' '}
+                          <strong>{formatReading(reading.measurement, reading.value)}</strong>
+                        </span>
+                      ))}
                     <span className="metric-line live">
-                      {climate.sensorCount} sensor{climate.sensorCount > 1 ? 'es' : ''}
+                      {climate.sensorCount} sensor{climate.sensorCount > 1 ? 'es' : ''} &middot; min{' '}
+                      {climate.min24!.toFixed(1)} / max {climate.max24!.toFixed(1)} &deg;C
                     </span>
                   </div>
                 </div>

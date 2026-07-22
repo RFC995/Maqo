@@ -360,5 +360,36 @@ function RoomFurniture({ room }: { room: Room }) {
           <Cabinet x={cx} z={cz - d / 2 + 0.4} w={Math.min(2.4, w * 0.5)} />
         </group>
       )
+    case 'sanitarios': {
+      // a row of cubicle dividers along the back wall
+      const stalls = Math.max(1, Math.floor(w / 1.3))
+      return (
+        <group>
+          {Array.from({ length: stalls }, (_, i) => (
+            <Cabinet
+              key={i}
+              x={cx - ((stalls - 1) * 1.3) / 2 + i * 1.3}
+              z={cz - d / 2 + 0.7}
+              w={1}
+            />
+          ))}
+        </group>
+      )
+    }
+    case 'tecnica':
+      return (
+        <group>
+          <Cabinet x={cx - w / 2 + 0.5} z={cz} w={Math.min(2.2, d * 0.6)} />
+          <Cabinet x={cx + w / 2 - 0.5} z={cz} w={Math.min(2.2, d * 0.6)} />
+        </group>
+      )
+    case 'corredor':
+      return null
+    default:
+      return (
+        <group>
+          <Cabinet x={px} z={pz} w={Math.min(2, w * 0.4)} />
+        </group>
+      )
   }
 }

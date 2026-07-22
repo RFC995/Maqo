@@ -1,6 +1,9 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { computePlotSize } from '../buildingGenerator'
 import { roomClimateFromSensors, statusColors, type Room, type SensorSource } from '../rooms'
+import { coverageRings, defaultPropagation, type Propagation } from '../rf'
+import { resolveModel } from '../catalog'
+import { calcularMapaCalor, mapaCalorParaDataUrl } from '../heatmap'
 import { deviceColors, type BuildingConfig, type DeviceItem, type FloorSelector } from '../types'
 
 interface FloorPlan2DProps {
@@ -13,6 +16,11 @@ interface FloorPlan2DProps {
   selectedId: string | null
   placementMode: boolean
   coverageVisible: boolean
+  mapaCalorVisivel?: boolean
+  propagation?: Propagation
+  selectedRoomId?: string | null
+  onSelectRoom?: (id: string | null) => void
+  onMoveRoom?: (id: string, x: number, z: number) => void
   onPlace: (x: number, z: number) => void
   onSelect: (id: string | null) => void
   onMove: (id: string, x: number, z: number) => void
@@ -34,12 +42,19 @@ export function FloorPlan2D({
   selectedId,
   placementMode,
   coverageVisible,
+  mapaCalorVisivel = false,
+  propagation = defaultPropagation,
+  selectedRoomId = null,
+  onSelectRoom,
+  onMoveRoom,
   onPlace,
   onSelect,
   onMove,
 }: FloorPlan2DProps) {
   const svgRef = useRef<SVGSVGElement | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
+  const [dragRoomId, setDragRoomId] = useState<string | null>(null)
+  const roomGrabOffset = useRef({ dx: 0, dz: 0 })
 
   const isGround = activeFloor === 'ground'
   const { plotWidth, plotDepth } = computePlotSize(building)
@@ -71,9 +86,10 @@ export function FloorPlan2D({
   }
 
   function handleBackgroundClick(evt: ReactPointerEvent<SVGSVGElement>) {
-    if (dragId) return
+    if (dragId || dragRoomId) return
     if (!placementMode) {
       onSelect(null)
+      onSelectRoom?.(null)
       return
     }
     const { x, z } = clientToLocal(evt)
@@ -87,15 +103,44 @@ export function FloorPlan2D({
     onSelect(id)
   }
 
-  function handlePointerMove(evt: ReactPointerEvent<SVGSVGElement>) {
-    if (!dragId) return
+  function handleRoomDown(evt: ReactPointerEvent<SVGGElement>, id: string) {
+    if (placementMode || !onSelectRoom) return
+    evt.stopPropagation()
+    const room = rooms.find((r) => r.id === id)
+    if (!room) return
     const { x, z } = clientToLocal(evt)
-    onMove(dragId, x, z)
+    // remember where inside the room the grab happened, so it does not jump
+    roomGrabOffset.current = { dx: room.x - x, dz: room.z - z }
+    ;(evt.target as Element).setPointerCapture?.(evt.pointerId)
+    setDragRoomId(id)
+    onSelectRoom(id)
+    onSelect(null)
+  }
+
+  function handlePointerMove(evt: ReactPointerEvent<SVGSVGElement>) {
+    if (dragId) {
+      const { x, z } = clientToLocal(evt)
+      onMove(dragId, x, z)
+      return
+    }
+    if (dragRoomId && onMoveRoom) {
+      const { x, z } = clientToLocal(evt)
+      const { dx, dz } = roomGrabOffset.current
+      onMoveRoom(dragRoomId, x + dx, z + dz)
+    }
   }
 
   function handlePointerUp() {
     setDragId(null)
+    setDragRoomId(null)
   }
+
+  // only interior floors have a heatmap; the roof and the plot are not rooms
+  const mapaCalor = useMemo(() => {
+    if (!mapaCalorVisivel || typeof activeFloor !== 'number') return null
+    const mapa = calcularMapaCalor(building, activeFloor, devices, propagation)
+    return { url: mapaCalorParaDataUrl(mapa), mapa }
+  }, [mapaCalorVisivel, activeFloor, building, devices, propagation])
 
   const gridStep = planW > 60 ? 10 : planW > 30 ? 5 : 2
 
@@ -146,11 +191,28 @@ export function FloorPlan2D({
               stroke="#20242c"
               strokeWidth={0.18}
             />
+            {mapaCalor && (
+              <image
+                href={mapaCalor.url}
+                x={-building.width / 2}
+                y={-building.depth / 2}
+                width={building.width}
+                height={building.depth}
+                preserveAspectRatio="none"
+                style={{ pointerEvents: 'none' }}
+              />
+            )}
             {rooms.map((room) => {
               const climate = roomClimateFromSensors(sensorsByRoom.get(room.id) ?? [], telemetryTick)
               const color = statusColors[climate.status]
+              const roomSelected = room.id === selectedRoomId
               return (
-                <g key={room.id} style={{ pointerEvents: 'none' }}>
+                <g
+                  key={room.id}
+                  className="floorplan-room"
+                  style={{ pointerEvents: placementMode ? 'none' : undefined, cursor: 'move' }}
+                  onPointerDown={(evt) => handleRoomDown(evt, room.id)}
+                >
                   <rect
                     x={room.x - room.width / 2}
                     y={room.z - room.depth / 2}
@@ -158,10 +220,23 @@ export function FloorPlan2D({
                     height={room.depth}
                     fill={color}
                     fillOpacity={climate.hasData ? 0.11 : 0.04}
-                    stroke={color}
-                    strokeWidth={0.16}
-                    strokeDasharray={climate.hasData ? undefined : '0.6 0.4'}
+                    stroke={roomSelected ? '#4f46e5' : color}
+                    strokeWidth={roomSelected ? 0.32 : 0.16}
+                    strokeDasharray={climate.hasData || roomSelected ? undefined : '0.6 0.4'}
                   />
+                  {roomSelected && (
+                    <rect
+                      x={room.x - room.width / 2 - 0.25}
+                      y={room.z - room.depth / 2 - 0.25}
+                      width={room.width + 0.5}
+                      height={room.depth + 0.5}
+                      fill="none"
+                      stroke="#4f46e5"
+                      strokeWidth={0.1}
+                      strokeDasharray="0.5 0.35"
+                      opacity={0.7}
+                    />
+                  )}
                   <text
                     x={room.x}
                     y={room.z - room.depth / 2 + Math.max(1.0, pad * 0.32)}
@@ -212,14 +287,29 @@ export function FloorPlan2D({
               className="floorplan-marker"
             >
               {coverageVisible &&
-                (isRf ? (
+                (device.type === 'gateway' ? (
                   <>
-                    <circle r={device.radius} fill="#ef4444" opacity={0.05} stroke="#ef4444" strokeOpacity={0.5} strokeWidth={0.12} />
-                    <circle r={device.radius * 0.66} fill="#eab308" opacity={0.06} stroke="#eab308" strokeOpacity={0.5} strokeWidth={0.12} />
-                    <circle r={device.radius * 0.33} fill="#22c55e" opacity={0.08} stroke="#22c55e" strokeOpacity={0.5} strokeWidth={0.12} />
+                    {[...coverageRings(device, propagation)].reverse().map((ring) => (
+                      <circle
+                        key={ring.sf}
+                        r={ring.drawRadius}
+                        fill={ring.color}
+                        opacity={0.06}
+                        stroke={ring.color}
+                        strokeOpacity={0.5}
+                        strokeWidth={0.12}
+                      />
+                    ))}
                   </>
                 ) : (
-                  <circle r={device.radius} fill={color} opacity={0.08} stroke={color} strokeOpacity={0.35} strokeWidth={0.1} />
+                  <circle
+                    r={device.radius}
+                    fill={color}
+                    opacity={isRf ? 0.06 : 0.08}
+                    stroke={color}
+                    strokeOpacity={0.35}
+                    strokeWidth={0.1}
+                  />
                 ))}
               {selected && <circle r={0.75} fill="none" stroke={color} strokeWidth={0.16} />}
               <circle r={0.42} fill={color} stroke="#111827" strokeWidth={0.08} />
@@ -234,7 +324,9 @@ export function FloorPlan2D({
                 paintOrder="stroke"
                 style={{ pointerEvents: 'none', fontWeight: 600 }}
               >
-                {device.name}
+                {/* the room already carries its own label, so a marker only
+                    needs its model code until it is the one being inspected */}
+                {selected ? device.name : (resolveModel(device.modelId)?.model ?? device.name)}
               </text>
             </g>
           )
