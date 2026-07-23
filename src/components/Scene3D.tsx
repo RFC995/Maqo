@@ -14,8 +14,9 @@ import {
 import { ToneMappingMode } from 'postprocessing'
 import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
-import type { BuildingConfig, DeviceItem, FloorSelector } from '../types'
+import type { Building, BuildingConfig, DeviceItem, FloorSelector } from '../types'
 import { buildingTopY, computePlotSize } from '../buildingGenerator'
+import { campusBounds } from '../buildings'
 import type { Room, SensorSource } from '../rooms'
 import { BuildingModel } from './Building'
 import { Site } from './Site'
@@ -29,7 +30,8 @@ import { calcularMapaCalor, desenharMapaCalor } from '../heatmap'
 export type TimeOfDay = 'day' | 'dusk' | 'night'
 
 interface Scene3DProps {
-  building: BuildingConfig
+  buildings: Building[]
+  activeBuildingId: string
   seed: number
   devices: DeviceItem[]
   selectedDeviceId: string | null
@@ -165,6 +167,22 @@ function computeHome(building: BuildingConfig): CameraFraming {
   }
 }
 
+/** Frames every building on the site at once — used by the "vista geral" of a multi-building campus. */
+function computeCampusHome(buildings: Building[]): CameraFraming {
+  if (buildings.length === 1) return computeHome(buildings[0].config)
+
+  const bounds = campusBounds(buildings)
+  const spanX = bounds.maxX - bounds.minX
+  const spanZ = bounds.maxZ - bounds.minZ
+  const size = Math.max(spanX, spanZ)
+  const height = Math.max(...buildings.map((b) => buildingTopY(b.config)))
+  const dist = size * 0.75 + height * 0.55 + 30
+  return {
+    position: [bounds.centerX + dist * 0.6, height * 0.5 + dist * 0.36, bounds.centerZ + dist * 0.7],
+    target: [bounds.centerX, height * 0.3, bounds.centerZ],
+  }
+}
+
 function computeFloorFraming(building: BuildingConfig, activeFloor: FloorSelector): CameraFraming {
   if (activeFloor === 'all') return computeHome(building)
 
@@ -198,11 +216,13 @@ function computeFloorFraming(building: BuildingConfig, activeFloor: FloorSelecto
 }
 
 function CameraRig({
-  building,
+  buildings,
+  activeBuildingId,
   activeFloor,
   resetSignal,
 }: {
-  building: BuildingConfig
+  buildings: Building[]
+  activeBuildingId: string
   activeFloor: FloorSelector
   resetSignal: number
 }) {
@@ -212,10 +232,14 @@ function CameraRig({
   const desiredTarget = useRef(new THREE.Vector3())
   const initialized = useRef(false)
   const animating = useRef(false)
-  const home = useMemo(() => computeHome(building), [building])
+  const activeBuilding = buildings.find((b) => b.id === activeBuildingId) ?? buildings[0]
+  const home = useMemo(() => computeCampusHome(buildings), [buildings])
 
   useEffect(() => {
-    const framing = computeFloorFraming(building, activeFloor)
+    const framing =
+      activeFloor === 'all'
+        ? computeCampusHome(buildings)
+        : translateFraming(computeFloorFraming(activeBuilding.config, activeFloor), activeBuilding.site)
     desiredPosition.current.set(...framing.position)
     desiredTarget.current.set(...framing.target)
 
@@ -229,7 +253,7 @@ function CameraRig({
       animating.current = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [building, activeFloor, resetSignal])
+  }, [buildings, activeBuilding, activeFloor, resetSignal])
 
   useFrame((_, delta) => {
     const controls = controlsRef.current
@@ -264,8 +288,17 @@ function CameraRig({
   )
 }
 
+/** `computeFloorFraming` works in a building's local coordinates; shift both points into world space. */
+function translateFraming(framing: CameraFraming, site: { x: number; z: number }): CameraFraming {
+  return {
+    position: [framing.position[0] + site.x, framing.position[1], framing.position[2] + site.z],
+    target: [framing.target[0] + site.x, framing.target[1], framing.target[2] + site.z],
+  }
+}
+
 export function Scene3D({
-  building,
+  buildings,
+  activeBuildingId,
   seed,
   devices,
   selectedDeviceId,
@@ -289,12 +322,26 @@ export function Scene3D({
 }: Scene3DProps) {
   const preset = lightPresets[timeOfDay]
   const perfil = perfisDeQualidade[qualidade]
-  const maxCoverageRadius = devices.reduce(
+  const activeBuilding = buildings.find((b) => b.id === activeBuildingId) ?? buildings[0]
+  const activeDevices = devices.filter((d) => d.buildingId === activeBuilding.id)
+  const maxCoverageRadius = activeDevices.reduce(
     (acc, d) => (d.type === 'gateway' || d.type === 'repeater' ? Math.max(acc, d.radius) : acc),
     0,
   )
 
-  const shadowSpan = Math.max(building.width, building.depth) * 1.6 + 30
+  const bounds = campusBounds(buildings)
+  // the directional light's shadow camera targets world origin (its default),
+  // not the campus centre, so the frustum has to be symmetric around 0. Same
+  // per-building padding as the original single-building formula
+  // (`max(width,depth) * 1.6 + 30`, generous enough to cover the surrounding
+  // Site grounds too), plus how far that building's own site offset sits
+  // from the origin.
+  const shadowSpan = Math.max(
+    ...buildings.map(
+      (b) => Math.max(Math.abs(b.site.x), Math.abs(b.site.z)) + Math.max(b.config.width, b.config.depth) * 1.6 + 30,
+    ),
+  )
+  const contactShadowsScale = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) + 40
 
   return (
     <Canvas
@@ -333,7 +380,13 @@ export function Scene3D({
       />
 
       {timeOfDay === 'night' && (
-        <pointLight position={[0, 3.4, building.depth / 2 + 2.2]} color="#ffdca0" intensity={12} distance={9} decay={2} />
+        <pointLight
+          position={[activeBuilding.site.x, 3.4, activeBuilding.site.z + activeBuilding.config.depth / 2 + 2.2]}
+          color="#ffdca0"
+          intensity={12}
+          distance={9}
+          decay={2}
+        />
       )}
 
       {preset.showSky && (
@@ -349,51 +402,85 @@ export function Scene3D({
 
       <SceneEnvironment timeOfDay={timeOfDay} preset={preset} sun={preset.sun} />
 
-      <Site building={building} seed={seed} timeOfDay={timeOfDay} minGroundHalf={maxCoverageRadius * 1.15} />
-      <BuildingModel building={building} seed={seed} activeFloor={activeFloor} litBoost={preset.litBoost} />
-      {typeof activeFloor === 'number' && (
-        <InteriorFloor
-          building={building}
-          floorIndex={activeFloor}
-          rooms={rooms}
-          telemetryTick={telemetryTick}
-          labelsVisible={labelsVisible}
-          sensorsByRoom={sensorsByRoom}
-        />
-      )}
-      <DeviceMarkers
-        devices={devices}
-        building={building}
-        selectedId={selectedDeviceId}
-        visibleFloor={activeFloor === 'roof' || activeFloor === 'ground' ? activeFloor : typeof activeFloor === 'number' ? activeFloor : 'all'}
-        coverageVisible={coverageVisible}
-        propagation={propagation}
-        coverageOpacity={coverageOpacity}
-        labelsVisible={labelsVisible}
-        onSelect={onSelectDevice}
+      {buildings.map((b) => {
+        const isActive = b.id === activeBuildingId
+        const buildingDevices = devices.filter((d) => d.buildingId === b.id)
+        return (
+          <group key={b.id} position={[b.site.x, 0, b.site.z]}>
+            <Site
+              building={b.config}
+              seed={seed}
+              timeOfDay={timeOfDay}
+              minGroundHalf={isActive ? maxCoverageRadius * 1.15 : 0}
+            />
+            <BuildingModel
+              building={b.config}
+              seed={seed}
+              activeFloor={isActive ? activeFloor : 'all'}
+              litBoost={preset.litBoost}
+            />
+            {isActive && typeof activeFloor === 'number' && (
+              <InteriorFloor
+                building={b.config}
+                floorIndex={activeFloor}
+                rooms={rooms}
+                telemetryTick={telemetryTick}
+                labelsVisible={labelsVisible}
+                sensorsByRoom={sensorsByRoom}
+              />
+            )}
+            <DeviceMarkers
+              devices={buildingDevices}
+              building={b.config}
+              selectedId={selectedDeviceId}
+              visibleFloor={
+                !isActive
+                  ? 'all'
+                  : activeFloor === 'roof' || activeFloor === 'ground'
+                    ? activeFloor
+                    : typeof activeFloor === 'number'
+                      ? activeFloor
+                      : 'all'
+              }
+              coverageVisible={coverageVisible && isActive}
+              propagation={propagation}
+              coverageOpacity={coverageOpacity}
+              labelsVisible={labelsVisible}
+              onSelect={onSelectDevice}
+            />
+            {isActive && (
+              <PlacementSurfaces
+                building={b.config}
+                siteOffset={b.site}
+                activeFloor={activeFloor}
+                placementMode={placementMode}
+                onPlaceInterior={onPlaceInterior}
+                onPlaceRoof={onPlaceRoof}
+                onPlaceGround={onPlaceGround}
+              />
+            )}
+            {isActive && mapaCalorVisivel && typeof activeFloor === 'number' && (
+              <MapaCalorNoPiso
+                building={b.config}
+                floorIndex={activeFloor}
+                devices={buildingDevices}
+                propagation={propagation ?? defaultPropagationRf}
+              />
+            )}
+          </group>
+        )
+      })}
+
+      <ContactShadows
+        position={[bounds.centerX, 0.02, bounds.centerZ]}
+        opacity={0.35}
+        scale={contactShadowsScale}
+        blur={2.4}
+        far={12}
       />
 
-      <PlacementSurfaces
-        building={building}
-        activeFloor={activeFloor}
-        placementMode={placementMode}
-        onPlaceInterior={onPlaceInterior}
-        onPlaceRoof={onPlaceRoof}
-        onPlaceGround={onPlaceGround}
-      />
+      <CameraRig buildings={buildings} activeBuildingId={activeBuildingId} activeFloor={activeFloor} resetSignal={resetSignal} />
 
-      <ContactShadows position={[0, 0.02, 0]} opacity={0.35} scale={Math.max(building.width, building.depth) * 2.4} blur={2.4} far={12} />
-
-      <CameraRig building={building} activeFloor={activeFloor} resetSignal={resetSignal} />
-
-      {mapaCalorVisivel && typeof activeFloor === 'number' && (
-        <MapaCalorNoPiso
-          building={building}
-          floorIndex={activeFloor}
-          devices={devices}
-          propagation={propagation ?? defaultPropagationRf}
-        />
-      )}
       <PosProcessamento preset={preset} perfil={perfil} />
       <RegistoDeCaptura />
     </Canvas>
@@ -589,6 +676,7 @@ function SceneEnvironment({
 
 function PlacementSurfaces({
   building,
+  siteOffset,
   activeFloor,
   placementMode,
   onPlaceInterior,
@@ -596,6 +684,7 @@ function PlacementSurfaces({
   onPlaceGround,
 }: {
   building: BuildingConfig
+  siteOffset: { x: number; z: number }
   activeFloor: FloorSelector
   placementMode: boolean
   onPlaceInterior: (floor: number, x: number, z: number) => void
@@ -612,7 +701,7 @@ function PlacementSurfaces({
         onPointerDown={(event) => {
           event.stopPropagation()
           if (!isNearestHit(event)) return
-          onPlaceInterior(activeFloor, event.point.x, event.point.z)
+          onPlaceInterior(activeFloor, event.point.x - siteOffset.x, event.point.z - siteOffset.z)
         }}
         visible={false}
       >
@@ -631,7 +720,7 @@ function PlacementSurfaces({
         onPointerDown={(event) => {
           event.stopPropagation()
           if (!isNearestHit(event)) return
-          onPlaceRoof(event.point.x, event.point.z)
+          onPlaceRoof(event.point.x - siteOffset.x, event.point.z - siteOffset.z)
         }}
       >
         <planeGeometry args={[building.width, building.depth]} />
@@ -647,7 +736,7 @@ function PlacementSurfaces({
       onPointerDown={(event) => {
         event.stopPropagation()
         if (!isNearestHit(event)) return
-        onPlaceGround(event.point.x, event.point.z)
+        onPlaceGround(event.point.x - siteOffset.x, event.point.z - siteOffset.z)
       }}
     >
       <planeGeometry args={[building.width * 3.2 + 60, building.depth * 3.2 + 60]} />

@@ -41,8 +41,12 @@ export function desktop(): MaqoDesktop | null {
 
 export const ehDesktop = () => desktop() !== null
 
-/** Filename suggested in the Save dialog, derived from the building name. */
+/** Filename suggested in the Save dialog, derived from the first building's name. */
 export function nomeSugerido(project: Project): string {
-  const base = project.building.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  const base = (project.buildings[0]?.config.name ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
   return base || 'maquete'
 }

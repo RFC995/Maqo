@@ -1,4 +1,4 @@
-import type { BuildingConfig, DeviceItem, Project, Room } from './types'
+import type { Building, BuildingConfig, DeviceItem, Project, Room } from './types'
 import { resolveModel, type DeviceModel } from './catalog'
 import { resolveRooms, pointInRoom } from './rooms'
 import { analyseLink, summariseNetwork, type LinkAnalysis, type Propagation } from './rf'
@@ -45,14 +45,14 @@ export interface LinhaPiso {
   devices: { device: DeviceItem; model: DeviceModel | undefined; sala: string }[]
 }
 
-/** Devices grouped by floor, each tagged with the room it falls inside. */
-export function dispositivosPorPiso(project: Project): LinhaPiso[] {
-  const building = project.building
+/** Devices grouped by floor, each tagged with the room it falls inside. Scoped to one building. */
+export function dispositivosPorPiso(project: Project, building: Building): LinhaPiso[] {
+  const devices = project.devices.filter((d) => d.buildingId === building.id)
   const grupos: LinhaPiso[] = []
 
-  for (let piso = 0; piso < building.floors; piso += 1) {
-    const rooms = resolveRooms(project, piso)
-    const doPiso = project.devices.filter((d) => d.mount === 'interior' && d.floor === piso)
+  for (let piso = 0; piso < building.config.floors; piso += 1) {
+    const rooms = resolveRooms(project, building, piso)
+    const doPiso = devices.filter((d) => d.mount === 'interior' && d.floor === piso)
     if (doPiso.length === 0) continue
     grupos.push({
       piso: piso === 0 ? 'Res-do-chao' : `Piso ${piso}`,
@@ -68,7 +68,7 @@ export function dispositivosPorPiso(project: Project): LinhaPiso[] {
     ['roof', 'Cobertura'],
     ['ground', 'Exterior'],
   ] as const) {
-    const lista = project.devices.filter((d) => d.mount === mount)
+    const lista = devices.filter((d) => d.mount === mount)
     if (lista.length === 0) continue
     grupos.push({
       piso: rotulo,
@@ -91,19 +91,21 @@ export interface LinhaLigacao {
   link: LinkAnalysis
 }
 
-/** Link budget per end device, worst links first — that is what gets reviewed. */
+/** Link budget per end device, worst links first — that is what gets reviewed. Scoped to one building: a gateway never covers a device in another building. */
 export function orcamentoDeLigacoes(
   project: Project,
+  building: Building,
   propagation: Propagation,
 ): LinhaLigacao[] {
-  const gateways = project.devices.filter((d) => d.type === 'gateway')
-  return project.devices
+  const devices = project.devices.filter((d) => d.buildingId === building.id)
+  const gateways = devices.filter((d) => d.type === 'gateway')
+  return devices
     .filter((d) => d.type !== 'gateway')
     .map((device) => ({
       device,
       model: resolveModel(device.modelId),
       local: localDoDispositivo(device),
-      link: analyseLink(device, gateways, project.building, propagation),
+      link: analyseLink(device, gateways, building.config, propagation),
     }))
     .sort((a, b) => a.link.marginDb - b.link.marginDb)
 }
@@ -120,10 +122,12 @@ export interface ResumoRelatorio {
 
 export function resumoDaRede(
   project: Project,
+  building: Building,
   propagation: Propagation,
   uplinkMinutes: number,
 ): ResumoRelatorio {
-  const s = summariseNetwork(project.devices, project.building, propagation, uplinkMinutes)
+  const devices = project.devices.filter((d) => d.buildingId === building.id)
+  const s = summariseNetwork(devices, building.config, propagation, uplinkMinutes)
   return {
     gateways: s.gateways,
     nos: s.endDevices,

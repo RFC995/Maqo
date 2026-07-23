@@ -1,8 +1,17 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import './App.css'
-import type { BuildingConfig, DeviceItem, DeviceType, FloorSelector, Project } from './types'
+import type { Building, BuildingConfig, DeviceItem, DeviceType, FloorSelector, Project } from './types'
 import { deviceLabels } from './types'
-import { createDefaultProject, exportProjectFile, importProjectFile, loadProject, saveProject } from './storage'
+import {
+  createDefaultProject,
+  exportProjectFile,
+  importProjectFile,
+  isValidProjectFile,
+  loadProject,
+  migrateProject,
+  saveProject,
+} from './storage'
+import { createBuilding } from './buildings'
 import type { PlanPreset } from './planPresets'
 import { clampRoom, createRoom, isFloorCustomised, pointInRoom, resolveRooms, type SensorSource } from './rooms'
 import type { Room } from './types'
@@ -16,6 +25,7 @@ import { NetworkPanel } from './components/NetworkPanel'
 import { RoomEditor } from './components/RoomEditor'
 import { TopBar } from './components/TopBar'
 import { FloorTabs } from './components/FloorTabs'
+import { BuildingTabs } from './components/BuildingTabs'
 import { Sidebar } from './components/Sidebar'
 import type { TimeOfDay } from './components/Scene3D'
 import type { Qualidade } from './qualidade'
@@ -42,6 +52,7 @@ function VistaACarregar() {
 
 function App() {
   const [project, setProject] = useState<Project>(() => loadProject() ?? createDefaultProject())
+  const [activeBuildingId, setActiveBuildingId] = useState<string>(() => project.buildings[0].id)
   const [activeFloor, setActiveFloor] = useState<FloorSelector>('all')
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null)
@@ -68,8 +79,20 @@ function App() {
 
   const propagation = propagationPresets[propagationPreset].value
 
-  const building = project.building
-  const devices = project.devices
+  const activeBuilding = project.buildings.find((b) => b.id === activeBuildingId) ?? project.buildings[0]
+  const building = activeBuilding.config
+  const devices = useMemo(
+    () => project.devices.filter((d) => d.buildingId === activeBuilding.id),
+    [project.devices, activeBuilding.id],
+  )
+
+  // the active building can disappear (deleted, or a freshly loaded/imported
+  // project) — fall back to the first one rather than pointing at nothing
+  useEffect(() => {
+    if (!project.buildings.some((b) => b.id === activeBuildingId)) {
+      setActiveBuildingId(project.buildings[0].id)
+    }
+  }, [project.buildings, activeBuildingId])
 
   const [telemetryTick, setTelemetryTick] = useState(0)
   useEffect(() => {
@@ -78,8 +101,8 @@ function App() {
   }, [])
 
   const rooms = useMemo(
-    () => (typeof activeFloor === 'number' ? resolveRooms(project, activeFloor) : []),
-    [project, activeFloor],
+    () => (typeof activeFloor === 'number' ? resolveRooms(project, activeBuilding, activeFloor) : []),
+    [project, activeBuilding, activeFloor],
   )
 
   const sensorsByRoom = useMemo(() => {
@@ -126,19 +149,55 @@ function App() {
     setProject((p) => ({ ...p, ...patch, updatedAt: new Date().toISOString() }))
   }
 
+  function replaceBuilding(id: string, patch: (b: Building) => Building) {
+    setProject((p) => ({
+      ...p,
+      buildings: p.buildings.map((b) => (b.id === id ? patch(b) : b)),
+      updatedAt: new Date().toISOString(),
+    }))
+  }
+
   function updateBuilding(patch: Partial<BuildingConfig>) {
     const nextFloors = patch.floors
+    const buildingId = activeBuilding.id
     if (typeof nextFloors === 'number' && nextFloors < building.floors) {
       setProject((p) => ({
         ...p,
-        building: { ...p.building, ...patch },
-        devices: p.devices.filter((d) => d.mount !== 'interior' || (d.floor ?? 0) < nextFloors),
+        buildings: p.buildings.map((b) => (b.id === buildingId ? { ...b, config: { ...b.config, ...patch } } : b)),
+        devices: p.devices.filter(
+          (d) => d.buildingId !== buildingId || d.mount !== 'interior' || (d.floor ?? 0) < nextFloors,
+        ),
         updatedAt: new Date().toISOString(),
       }))
       if (typeof activeFloor === 'number' && activeFloor >= nextFloors) setActiveFloor('all')
       return
     }
-    setProject((p) => ({ ...p, building: { ...p.building, ...patch }, updatedAt: new Date().toISOString() }))
+    replaceBuilding(buildingId, (b) => ({ ...b, config: { ...b.config, ...patch } }))
+  }
+
+  function updateBuildingSite(id: string, site: { x?: number; z?: number }) {
+    replaceBuilding(id, (b) => ({ ...b, site: { ...b.site, ...site } }))
+  }
+
+  function addBuilding() {
+    const next = createBuilding(project.buildings)
+    setProject((p) => ({ ...p, buildings: [...p.buildings, next], updatedAt: new Date().toISOString() }))
+    setActiveBuildingId(next.id)
+    setActiveFloor('all')
+  }
+
+  function deleteBuilding(id: string) {
+    if (project.buildings.length <= 1) return
+    if (!window.confirm('Remover este edificio? Os seus dispositivos e salas sao removidos com ele.')) return
+    setProject((p) => ({
+      ...p,
+      buildings: p.buildings.filter((b) => b.id !== id),
+      devices: p.devices.filter((d) => d.buildingId !== id),
+      rooms: p.rooms
+        ? Object.fromEntries(Object.entries(p.rooms).filter(([key]) => !key.startsWith(`${id}:`)))
+        : p.rooms,
+      updatedAt: new Date().toISOString(),
+    }))
   }
 
   function regenerateVariant() {
@@ -184,9 +243,10 @@ function App() {
    * auto-generated floor materialises it, so the layout stops following the seed.
    */
   function commitRooms(floor: number, next: Room[]) {
+    const key = `${activeBuilding.id}:${floor}`
     setProject((p) => ({
       ...p,
-      rooms: { ...(p.rooms ?? {}), [String(floor)]: next },
+      rooms: { ...(p.rooms ?? {}), [key]: next },
       updatedAt: new Date().toISOString(),
     }))
   }
@@ -219,7 +279,7 @@ function App() {
     if (typeof activeFloor !== 'number') return
     setProject((p) => {
       const next = { ...(p.rooms ?? {}) }
-      delete next[String(activeFloor)]
+      delete next[`${activeBuilding.id}:${activeFloor}`]
       return { ...p, rooms: next, updatedAt: new Date().toISOString() }
     })
     setSelectedRoomId(null)
@@ -234,9 +294,10 @@ function App() {
     modelId?: string,
   ) {
     const model = resolveModel(modelId) ?? defaultModelFor(type)
-    const countOfType = project.devices.filter((d) => d.type === type).length
+    const countOfType = devices.filter((d) => d.type === type).length
     const device: DeviceItem = {
       id: crypto.randomUUID(),
+      buildingId: activeBuilding.id,
       type,
       modelId: model.id,
       name: `${deviceLabels[type]} ${countOfType + 1}`,
@@ -274,8 +335,8 @@ function App() {
 
   function clearAll() {
     if (devices.length === 0) return
-    if (!window.confirm('Remover todos os dispositivos deste projeto?')) return
-    touch({ devices: [] })
+    if (!window.confirm('Remover todos os dispositivos deste edificio?')) return
+    touch({ devices: project.devices.filter((d) => d.buildingId !== activeBuilding.id) })
     setSelectedDeviceId(null)
   }
 
@@ -288,10 +349,14 @@ function App() {
   }
 
   function applyPlan(preset: PlanPreset) {
-    if (devices.length > 0 && !window.confirm(`Aplicar o plano "${preset.name}"? Os dispositivos atuais serao substituidos.`)) {
+    if (
+      devices.length > 0 &&
+      !window.confirm(`Aplicar o plano "${preset.name}"? Os dispositivos atuais deste edificio serao substituidos.`)
+    ) {
       return
     }
-    touch({ devices: preset.generate(building, project.seed) })
+    const novos = preset.generate(building, project.seed).map((d) => ({ ...d, buildingId: activeBuilding.id }))
+    touch({ devices: [...project.devices.filter((d) => d.buildingId !== activeBuilding.id), ...novos] })
     setSelectedDeviceId(null)
     setPlacementType(null)
     setActiveFloor('all')
@@ -327,6 +392,7 @@ function App() {
     importProjectFile(file)
       .then((imported) => {
         setProject(imported)
+        setActiveBuildingId(imported.buildings[0].id)
         setSelectedDeviceId(null)
         setActiveFloor('all')
       })
@@ -335,7 +401,9 @@ function App() {
 
   function handleNewProject() {
     if (!window.confirm('Comecar um novo projeto? Perdes as alteracoes nao exportadas do projeto atual.')) return
-    setProject(createDefaultProject())
+    const fresh = createDefaultProject()
+    setProject(fresh)
+    setActiveBuildingId(fresh.buildings[0].id)
     setSelectedDeviceId(null)
     setActiveFloor('all')
     setPlacementType(null)
@@ -350,9 +418,11 @@ function App() {
     const desligar = [
       shell.aoAbrirProjeto(({ caminho, conteudo }) => {
         try {
-          const importado = JSON.parse(conteudo) as Project
-          if (!importado || importado.version !== 1 || !importado.building) throw new Error('invalido')
+          const parsed = JSON.parse(conteudo)
+          if (!isValidProjectFile(parsed)) throw new Error('invalido')
+          const importado = migrateProject(parsed)
           setProject(importado)
+          setActiveBuildingId(importado.buildings[0].id)
           setFicheiroAtual(caminho)
           setSelectedDeviceId(null)
           setActiveFloor('all')
@@ -410,6 +480,8 @@ function App() {
         <Sidebar
           building={building}
           onUpdateBuilding={updateBuilding}
+          site={activeBuilding.site}
+          onUpdateSite={(site) => updateBuildingSite(activeBuilding.id, site)}
           onRegenerateVariant={regenerateVariant}
           network={
             <NetworkPanel
@@ -429,7 +501,7 @@ function App() {
                 building={building}
                 rooms={rooms}
                 floorLabel={activeFloor === 0 ? 'Res-do-chao' : `Piso ${activeFloor}`}
-                customised={isFloorCustomised(project, activeFloor)}
+                customised={isFloorCustomised(project, activeBuilding, activeFloor)}
                 selectedRoomId={selectedRoomId}
                 onSelectRoom={setSelectedRoomId}
                 onUpdateRoom={updateRoom}
@@ -479,15 +551,27 @@ function App() {
         </DraggablePanel>
 
         <main className="viewport-area">
+          <BuildingTabs
+            buildings={project.buildings}
+            devices={project.devices}
+            activeBuildingId={activeBuilding.id}
+            onChange={(id) => {
+              setActiveBuildingId(id)
+              setActiveFloor('all')
+            }}
+            onAdd={addBuilding}
+            onDelete={deleteBuilding}
+          />
           <FloorTabs building={building} devices={devices} activeFloor={activeFloor} onChange={setActiveFloor} />
 
           <div className={activeFloor === 'all' ? 'viewport-split full' : 'viewport-split'}>
             <div className="canvas-wrap">
               <Suspense fallback={<VistaACarregar />}>
                 <Scene3D
-                building={building}
+                buildings={project.buildings}
+                activeBuildingId={activeBuilding.id}
                 seed={project.seed}
-                devices={devices}
+                devices={project.devices}
                 selectedDeviceId={selectedDeviceId}
                 activeFloor={activeFloor}
                 timeOfDay={timeOfDay}

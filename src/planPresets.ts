@@ -8,7 +8,8 @@ export interface PlanPreset {
   description: string
   /** the models the preset deploys, for the card's bill of materials */
   models: string[]
-  generate: (building: BuildingConfig, seed: number) => DeviceItem[]
+  /** buildingId is stamped on by the caller, which knows which building is active */
+  generate: (building: BuildingConfig, seed: number) => Omit<DeviceItem, 'buildingId'>[]
 }
 
 interface Draft {
@@ -29,7 +30,7 @@ function model(id: string): DeviceModel {
   return found
 }
 
-function materialize(drafts: Draft[]): DeviceItem[] {
+function materialize(drafts: Draft[]): Omit<DeviceItem, 'buildingId'>[] {
   const counters = new Map<string, number>()
   return drafts.map((d) => {
     const count = (counters.get(d.model.id) ?? 0) + 1

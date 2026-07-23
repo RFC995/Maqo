@@ -1,4 +1,4 @@
-import type { BuildingConfig, Project, Room, RoomKind } from './types'
+import type { Building, BuildingConfig, Project, Room, RoomKind } from './types'
 import { roomKindLabels } from './types'
 import { createRng } from './buildingGenerator'
 import type { Measurement } from './catalog'
@@ -77,18 +77,22 @@ export function generateRooms(building: BuildingConfig, floorIndex: number, seed
   return rooms
 }
 
+function roomsKey(buildingId: string, floorIndex: number) {
+  return `${buildingId}:${floorIndex}`
+}
+
 /**
  * The rooms in force for a floor: the user's saved layout when there is one,
  * otherwise the procedural layout for the current seed.
  */
-export function resolveRooms(project: Project, floorIndex: number): Room[] {
-  const saved = project.rooms?.[String(floorIndex)]
+export function resolveRooms(project: Project, building: Building, floorIndex: number): Room[] {
+  const saved = project.rooms?.[roomsKey(building.id, floorIndex)]
   if (saved) return saved
-  return generateRooms(project.building, floorIndex, project.seed)
+  return generateRooms(building.config, floorIndex, project.seed)
 }
 
-export function isFloorCustomised(project: Project, floorIndex: number): boolean {
-  return project.rooms?.[String(floorIndex)] !== undefined
+export function isFloorCustomised(project: Project, building: Building, floorIndex: number): boolean {
+  return project.rooms?.[roomsKey(building.id, floorIndex)] !== undefined
 }
 
 /** A new room dropped in the middle of the floor, ready to be dragged. */

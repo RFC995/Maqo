@@ -7,6 +7,9 @@ type TabId = 'edificio' | 'rede' | 'salas'
 interface SidebarProps {
   building: BuildingConfig
   onUpdateBuilding: (patch: Partial<BuildingConfig>) => void
+  /** this building's centre on the shared site, in world coordinates */
+  site: { x: number; z: number }
+  onUpdateSite: (patch: { x?: number; z?: number }) => void
   onRegenerateVariant: () => void
   /** network analysis section */
   network: ReactNode
@@ -19,7 +22,7 @@ interface SidebarProps {
  * are far taller than the viewport, and stacking them buried the building
  * controls under a scroll.
  */
-export function Sidebar({ building, onUpdateBuilding, onRegenerateVariant, network, rooms }: SidebarProps) {
+export function Sidebar({ building, onUpdateBuilding, site, onUpdateSite, onRegenerateVariant, network, rooms }: SidebarProps) {
   const [tab, setTab] = useState<TabId>('edificio')
 
   // the rooms tab only exists while a floor is selected
@@ -116,6 +119,28 @@ export function Sidebar({ building, onUpdateBuilding, onRegenerateVariant, netwo
             <button type="button" className="secondary" onClick={onRegenerateVariant}>
               Gerar nova variante
             </button>
+
+            <h3 style={{ marginTop: 4 }}>Posicao no terreno</h3>
+            <div className="field-grid">
+              <label>
+                X (m)
+                <input
+                  type="number"
+                  step={1}
+                  value={site.x}
+                  onChange={(event) => onUpdateSite({ x: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                Z (m)
+                <input
+                  type="number"
+                  step={1}
+                  value={site.z}
+                  onChange={(event) => onUpdateSite({ z: Number(event.target.value) })}
+                />
+              </label>
+            </div>
           </section>
         )}
 
