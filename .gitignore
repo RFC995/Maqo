@@ -30,3 +30,6 @@ release
 # Se isto vazar, qualquer pessoa pode emitir chaves validas.
 chave-privada.pem
 licencas-emitidas.log
+
+# NUNCA versionar: service role key do Supabase (acesso total, contorna RLS).
+.env

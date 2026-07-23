@@ -17,6 +17,12 @@ const raiz = join(dirname(fileURLToPath(import.meta.url)), '..')
 const caminhoPrivada = join(raiz, 'chave-privada.pem')
 const registo = join(raiz, 'licencas-emitidas.log')
 
+try {
+  process.loadEnvFile(join(raiz, '.env'))
+} catch {
+  // .env opcional — sem ele so falha o registo remoto, nao a emissao da chave
+}
+
 if (!existsSync(caminhoPrivada)) {
   console.error('\nFalta a chave-privada.pem. Corre primeiro:\n  npm run licenca:iniciar\n')
   process.exit(1)
@@ -73,4 +79,47 @@ try {
   console.log(`Registado em ${registo}\n`)
 } catch {
   // logging is a convenience, not a requirement
+}
+
+await registarNoSupabase(dados)
+
+/**
+ * Regista a licenca na tabela remota para que possa vir a ser revogada.
+ * Sem isto a chave continua a funcionar (a verificacao local nao muda) mas
+ * fica invisivel para o painel de gestao e o servidor trata-a como "nao
+ * encontrada" -> nunca revogada.
+ */
+async function registarNoSupabase(dadosLicenca) {
+  const url = process.env.SUPABASE_URL
+  const chaveServico = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !chaveServico) {
+    console.log('SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY em falta (ver .env.example) — licenca nao registada para revogacao remota.\n')
+    return
+  }
+
+  try {
+    const resposta = await fetch(`${url}/rest/v1/licencas`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: chaveServico,
+        Authorization: `Bearer ${chaveServico}`,
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify({
+        id: dadosLicenca.id,
+        nome: dadosLicenca.nome,
+        emitida: dadosLicenca.emitida,
+        expira: dadosLicenca.expira ?? null,
+        notas: dadosLicenca.notas ?? null,
+      }),
+    })
+    if (!resposta.ok) {
+      console.error(`Aviso: falha a registar no Supabase (${resposta.status} ${await resposta.text()}).\n`)
+      return
+    }
+    console.log('Registado no Supabase (revogavel a partir do painel).\n')
+  } catch (erro) {
+    console.error(`Aviso: falha a registar no Supabase: ${erro.message}\n`)
+  }
 }

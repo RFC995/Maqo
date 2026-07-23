@@ -127,4 +127,34 @@ function removerLicenca(userDataPath) {
   }
 }
 
-module.exports = { verificarChave, guardarLicenca, licencaGuardada, removerLicenca, normalizar }
+/** Reads the raw stored record (chave/dados/ativadaEm + whatever licenca-remota.cjs merged in), or null. */
+function lerEstadoBruto(userDataPath) {
+  try {
+    return JSON.parse(fs.readFileSync(caminhoLicenca(userDataPath), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+/** Shallow-merges a patch into the stored record. Used by licenca-remota.cjs to track offline-tolerance state. */
+function atualizarLicenca(userDataPath, patch) {
+  const atual = lerEstadoBruto(userDataPath)
+  if (!atual) return false
+  try {
+    fs.writeFileSync(caminhoLicenca(userDataPath), JSON.stringify({ ...atual, ...patch }, null, 2), 'utf8')
+    return true
+  } catch {
+    return false
+  }
+}
+
+module.exports = {
+  verificarChave,
+  guardarLicenca,
+  licencaGuardada,
+  removerLicenca,
+  normalizar,
+  caminhoLicenca,
+  lerEstadoBruto,
+  atualizarLicenca,
+}

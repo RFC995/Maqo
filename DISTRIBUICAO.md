@@ -49,9 +49,8 @@ O `app.asar` abre-se com um comando e o codigo le-se. Isto e verdade em
 falha desta implementacao. O objetivo realista e impedir chaves inventadas e
 partilha casual, e isso esta cumprido.
 
-Se um dia precisares de **revogar** uma licenca ja entregue, ai sim e preciso um
-servidor de ativacao online — a app passaria a confirmar periodicamente se a
-chave continua valida. Da para acrescentar por cima do que ja existe.
+**Revogacao remota:** a app confirma a licenca contra um servidor (Supabase) no
+arranque e depois a cada 6h enquanto esta aberta — ver secao seguinte.
 
 ### Arranque (fazer uma vez)
 
@@ -89,6 +88,51 @@ Sem `--expira` a licenca nao caduca. Cada emissao fica registada em
 
 Em **Ajuda → Licenca** ve-se a quem esta licenciada e ate quando.
 **Ajuda → Desativar esta instalacao** limpa a chave e volta a pedi-la.
+
+### Revogar uma licenca (cortar o acesso a alguem)
+
+Cada chave emitida fica tambem registada numa tabela `licencas` num projeto
+Supabase. A app pergunta a essa tabela (atraves de uma Edge Function,
+`verificar-licenca`) se a sua chave continua ativa:
+
+- No arranque, e a cada 6h enquanto a app esta aberta.
+- Se a resposta for "revogada", a app mostra o aviso e fecha — mesmo a meio
+  de uma sessao.
+- Sem internet, a app continua a funcionar ate 7 dias desde a ultima
+  confirmacao boa; passado isso, bloqueia ate voltar a haver ligacao.
+
+**Para revogar:** abre o [dashboard do projeto Supabase](https://supabase.com/dashboard) →
+**Table Editor** → tabela `licencas` → encontra a linha pelo `id` ou `nome` →
+muda `revogada` para `true`. Na proxima verificacao (arranque ou dentro de 6h,
+o que vier primeiro) o colega perde o acesso. Para reverter, volta a por
+`false`.
+
+A coluna `ultima_verificacao` mostra a ultima vez que essa instalacao
+confirmou a licenca, e `device_id` identifica a maquina que a ativou primeiro
+— util para perceber se uma chave esta a ser partilhada entre varias maquinas
+(o `device_id` so muda se a app for reinstalada a apagar o `device-id.txt`
+guardado nos dados do utilizador).
+
+### Configurar o servidor de revogacao (uma vez)
+
+1. Cria um projeto em [supabase.com](https://supabase.com) (plano free chega).
+2. Aplica a migracao e publica a funcao (com o [Supabase CLI](https://supabase.com/docs/guides/cli)):
+   ```
+   npx supabase login
+   npx supabase link --project-ref <ref-do-teu-projeto>
+   npx supabase db push
+   npx supabase functions deploy verificar-licenca
+   ```
+3. Preenche `electron/supabase-config.cjs` com o `Project URL` e a `anon public
+   key` (Project Settings → API). Estes dois valores vao dentro da app —
+   sao publicos por definicao, o RLS da tabela e que impede acesso direto.
+4. Cria um `.env` na raiz (a partir de `.env.example`) com `SUPABASE_URL` e a
+   `service_role key` — **nunca** a `anon key` para isto, e **nunca** comitar
+   este ficheiro. E usado so por `npm run licenca` para registar cada chave
+   emitida na tabela.
+
+Sem isto configurado, a app funciona exatamente como antes (so verificacao
+local) — o pedido remoto falha em silencio e cai na tolerancia offline.
 
 ---
 

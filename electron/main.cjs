@@ -3,6 +3,11 @@ const fs = require('node:fs/promises')
 const path = require('node:path')
 
 const { verificarChave, guardarLicenca, licencaGuardada, removerLicenca } = require('./licenca.cjs')
+const {
+  TOLERANCIA_DIAS,
+  INTERVALO_VERIFICACAO_MS,
+  verificarRevogacaoComTolerancia,
+} = require('./licenca-remota.cjs')
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL
 const ehDev = !!DEV_URL
@@ -12,6 +17,7 @@ let janelaAtivacao = null
 /** Path of the project file currently open, if any. */
 let ficheiroAtual = null
 let licencaAtiva = null
+let temporizadorVerificacao = null
 
 function tituloJanela() {
   const nome = ficheiroAtual ? path.basename(ficheiroAtual) : 'Projeto sem titulo'
@@ -43,14 +49,26 @@ function abrirJanelaAtivacao() {
   })
 }
 
-ipcMain.handle('licenca:ativar', (_evento, chave) => {
+ipcMain.handle('licenca:ativar', async (_evento, chave) => {
   const resultado = verificarChave(chave)
   if (!resultado.valida) return { ok: false, motivo: resultado.motivo }
 
-  guardarLicenca(app.getPath('userData'), chave, resultado.dados)
-  licencaAtiva = resultado.dados
+  const userDataPath = app.getPath('userData')
+  guardarLicenca(userDataPath, chave, resultado.dados)
 
+  // melhor esforco: se o servidor responder "revogada" logo na ativacao
+  // (ex.: chave entregue por engano e revogada entretanto), recusa aqui.
+  // Sem rede neste momento, a ativacao segue — a tolerancia offline arranca
+  // a contar a partir de agora (ver guardarLicenca -> ativadaEm).
+  const remoto = await verificarRevogacaoComTolerancia(userDataPath, resultado.dados.id)
+  if (remoto.estado === 'revogada') {
+    removerLicenca(userDataPath)
+    return { ok: false, motivo: 'Esta licenca foi revogada. Contacta quem te forneceu o Maqo.' }
+  }
+
+  licencaAtiva = resultado.dados
   criarJanela()
+  iniciarVerificacaoPeriodica()
   if (janelaAtivacao) {
     const aFechar = janelaAtivacao
     janelaAtivacao = null
@@ -273,10 +291,74 @@ function criarJanela() {
   })
 }
 
-app.whenReady().then(() => {
-  licencaAtiva = licencaGuardada(app.getPath('userData'))
-  if (licencaAtiva) criarJanela()
-  else abrirJanelaAtivacao()
+/** Mostra o motivo do bloqueio e fecha a app. */
+function bloquearEFechar(titulo, detalhe) {
+  if (temporizadorVerificacao) clearInterval(temporizadorVerificacao)
+  dialog.showErrorBox(titulo, detalhe)
+  app.quit()
+}
+
+/**
+ * Confirma no servidor que a licenca guardada continua ativa. Corre no
+ * arranque e depois periodicamente enquanto a app esta aberta, para que uma
+ * revogacao feita a meio de uma sessao tenha efeito sem esperar por um
+ * reinicio.
+ */
+async function verificarEmSegundoPlano() {
+  const userDataPath = app.getPath('userData')
+  const guardada = licencaGuardada(userDataPath)
+  if (!guardada) return // assinatura/expiry local ja invalidou — nada a fazer aqui
+
+  const resultado = await verificarRevogacaoComTolerancia(userDataPath, guardada.dados.id)
+  if (resultado.estado === 'revogada') {
+    bloquearEFechar('Licenca revogada', 'Esta licenca foi revogada. Contacta quem te forneceu o Maqo.')
+    return
+  }
+  if (resultado.estado === 'bloqueada-sem-rede') {
+    bloquearEFechar(
+      'Sem ligacao a internet',
+      `Nao foi possivel confirmar a licenca ha mais de ${TOLERANCIA_DIAS} dias. Liga-te a internet e volta a abrir o Maqo.`,
+    )
+    return
+  }
+  if (resultado.offline && resultado.diasRestantes <= 2 && janela) {
+    dialog.showMessageBox(janela, {
+      type: 'warning',
+      buttons: ['Ok'],
+      message: 'Sem ligacao a internet',
+      detail: `Nao foi possivel confirmar a licenca online. Restam ${resultado.diasRestantes} dia(s) de tolerancia antes de a app deixar de funcionar sem ligacao.`,
+    })
+  }
+}
+
+function iniciarVerificacaoPeriodica() {
+  if (temporizadorVerificacao) return
+  temporizadorVerificacao = setInterval(verificarEmSegundoPlano, INTERVALO_VERIFICACAO_MS)
+}
+
+app.whenReady().then(async () => {
+  const userDataPath = app.getPath('userData')
+  const guardada = licencaGuardada(userDataPath)
+
+  if (!guardada) {
+    abrirJanelaAtivacao()
+  } else {
+    const remoto = await verificarRevogacaoComTolerancia(userDataPath, guardada.dados.id)
+    if (remoto.estado === 'revogada') {
+      bloquearEFechar('Licenca revogada', 'Esta licenca foi revogada. Contacta quem te forneceu o Maqo.')
+      return
+    }
+    if (remoto.estado === 'bloqueada-sem-rede') {
+      bloquearEFechar(
+        'Sem ligacao a internet',
+        `Nao foi possivel confirmar a licenca ha mais de ${TOLERANCIA_DIAS} dias. Liga-te a internet e volta a abrir o Maqo.`,
+      )
+      return
+    }
+    licencaAtiva = guardada.dados
+    criarJanela()
+    iniciarVerificacaoPeriodica()
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
