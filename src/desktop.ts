@@ -13,6 +13,33 @@ export interface LicencaInfo {
   notas?: string
 }
 
+/** Ligacao a um LNS (ChirpStack), tal como o renderer a pode ver — nunca inclui o token. */
+export interface LnsLigacaoEstado {
+  configurado: boolean
+  baseUrl?: string
+  applicationId?: string
+}
+
+export interface LnsLigacaoDados {
+  baseUrl: string
+  applicationId: string
+  apiToken: string
+}
+
+export interface LnsDispositivo {
+  devEui: string
+  nome: string
+  ultimaVezVisto: string | null
+}
+
+/** Uma leitura de um ciclo de polling. `medidas` usa as chaves de Measurement do catalogo. */
+export interface LnsLeitura {
+  devEui: string
+  medidas: Partial<Record<string, number>>
+  recebidoEm: string
+  erro?: string
+}
+
 interface MaqoDesktop {
   ehDesktop: true
   ativarLicenca: (chave: string) => Promise<{ ok: boolean; motivo?: string; dados?: LicencaInfo }>
@@ -24,6 +51,16 @@ interface MaqoDesktop {
   ) => Promise<{ ok: boolean; caminho?: string }>
   caminhoAtual: () => Promise<string | null>
   guardarRelatorioPdf: (nomeSugerido: string) => Promise<{ ok: boolean; caminho?: string }>
+
+  // LNS (ChirpStack)
+  lnsGuardarLigacao: (dados: LnsLigacaoDados) => Promise<{ ok: boolean; motivo?: string }>
+  lnsObterLigacao: () => Promise<LnsLigacaoEstado>
+  lnsRemoverLigacao: () => Promise<boolean>
+  lnsTestarLigacao: (dados?: LnsLigacaoDados) => Promise<{ ok: boolean; motivo?: string; totalDispositivos?: number }>
+  lnsListarDispositivos: () => Promise<{ ok: boolean; motivo?: string; dispositivos?: LnsDispositivo[] }>
+  lnsDefinirSubscricoes: (devEuis: string[]) => Promise<void>
+  aoReceberLeituraLns: (cb: (leituras: LnsLeitura[]) => void) => () => void
+
   aoAbrirProjeto: (cb: (payload: { caminho: string; conteudo: string }) => void) => () => void
   aoPedirParaGuardar: (cb: (payload: { comoNovo: boolean }) => void) => () => void
   aoNovoProjeto: (cb: () => void) => () => void

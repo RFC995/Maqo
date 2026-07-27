@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { computePlotSize } from '../buildingGenerator'
-import { roomClimateFromSensors, statusColors, type Room, type SensorSource } from '../rooms'
+import { roomClimateFromSensors, statusColors, type LiveReadings, type Room, type SensorSource } from '../rooms'
 import { coverageRings, defaultPropagation, type Propagation } from '../rf'
 import { resolveModel } from '../catalog'
 import { calcularMapaCalor, mapaCalorParaDataUrl } from '../heatmap'
@@ -13,6 +13,7 @@ interface FloorPlan2DProps {
   rooms: Room[]
   sensorsByRoom: Map<string, SensorSource[]>
   telemetryTick: number
+  liveReadings?: LiveReadings
   selectedId: string | null
   placementMode: boolean
   coverageVisible: boolean
@@ -39,6 +40,7 @@ export function FloorPlan2D({
   rooms,
   sensorsByRoom,
   telemetryTick,
+  liveReadings,
   selectedId,
   placementMode,
   coverageVisible,
@@ -203,7 +205,7 @@ export function FloorPlan2D({
               />
             )}
             {rooms.map((room) => {
-              const climate = roomClimateFromSensors(sensorsByRoom.get(room.id) ?? [], telemetryTick)
+              const climate = roomClimateFromSensors(sensorsByRoom.get(room.id) ?? [], telemetryTick, liveReadings)
               const color = statusColors[climate.status]
               const roomSelected = room.id === selectedRoomId
               return (

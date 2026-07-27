@@ -1,0 +1,10 @@
+PBR material scans — CC0 (public domain), no attribution required, credited here as good practice.
+Source: Poly Haven (https://polyhaven.com)
+
+wall/    -> "Painted Plaster Wall" https://polyhaven.com/a/painted_plaster_wall
+plaza/   -> "Concrete Floor Worn 001" https://polyhaven.com/a/concrete_floor_worn_001
+asphalt/ -> "Asphalt 02" https://polyhaven.com/a/asphalt_02
+grass/   -> "Aerial Grass Rock" https://polyhaven.com/a/aerial_grass_rock
+roof/    -> "Gravel Embedded Concrete" https://polyhaven.com/a/gravel_embedded_concrete
+
+Each folder has diffuse.jpg, normal.jpg (OpenGL convention) and roughness.jpg.

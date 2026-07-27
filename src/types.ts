@@ -37,6 +37,8 @@ export interface DeviceItem {
   z: number
   radius: number
   notes: string
+  /** DevEUI do dispositivo real associado num LNS (ChirpStack), para leituras em tempo real. */
+  devEui?: string
 }
 
 export type RoomKind =

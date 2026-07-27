@@ -17,7 +17,7 @@ import { clampRoom, createRoom, isFloorCustomised, pointInRoom, resolveRooms, ty
 import type { Room } from './types'
 import { defaultModelFor, resolveModel } from './catalog'
 import { propagationPresets } from './rf'
-import { desktop, ehDesktop, nomeSugerido } from './desktop'
+import { desktop, ehDesktop, nomeSugerido, type LnsDispositivo } from './desktop'
 import { capturarVista3D } from './captura'
 import { Relatorio } from './components/Relatorio'
 import { RoomStats } from './components/RoomStats'
@@ -32,7 +32,9 @@ import type { Qualidade } from './qualidade'
 import { FloorPlan2D } from './components/FloorPlan2D'
 import { DraggablePanel } from './components/DraggablePanel'
 import { DevicesPanel } from './components/DevicesPanel'
-import { GatewayIcon } from './components/icons'
+import { LnsPanel } from './components/LnsPanel'
+import { GatewayIcon, SignalIcon } from './components/icons'
+import { useLnsReadings } from './lns'
 
 /**
  * three.js, drei and the postprocessing stack are by far the largest part of
@@ -76,6 +78,22 @@ function App() {
   // opens just right of the sidebar, over the 3D view — the far right belongs to
   // the 2D plan, which is the precision tool and must not be covered
   const [devicesPanelPosition] = useState(() => ({ x: 336, y: 128 }))
+  const [lnsPanelPosition] = useState(() => ({ x: 336, y: 420 }))
+  const [lnsPanelAberto, setLnsPanelAberto] = useState(false)
+  const [lnsDispositivos, setLnsDispositivos] = useState<LnsDispositivo[]>([])
+  const { readings: lnsReadings, liveReadings } = useLnsReadings()
+
+  async function atualizarDispositivosLns() {
+    const resultado = await desktop()?.lnsListarDispositivos()
+    if (resultado?.ok) setLnsDispositivos(resultado.dispositivos ?? [])
+    return resultado
+  }
+
+  // se ja houver uma ligacao guardada de uma sessao anterior, mostra logo a
+  // lista de dispositivos conhecidos sem o utilizador ter de abrir o painel
+  useEffect(() => {
+    if (ehDesktop()) atualizarDispositivosLns()
+  }, [])
 
   const propagation = propagationPresets[propagationPreset].value
 
@@ -100,6 +118,17 @@ function App() {
     return () => clearInterval(timer)
   }, [])
 
+  // tells the main process which real devices to poll — every sensor bound to
+  // a devEui anywhere in the project, not just the active building/floor.
+  // A no-op in the browser build (desktop() is null there).
+  const boundDevEuis = useMemo(
+    () => [...new Set(project.devices.map((d) => d.devEui?.trim()).filter((v): v is string => !!v))],
+    [project.devices],
+  )
+  useEffect(() => {
+    desktop()?.lnsDefinirSubscricoes(boundDevEuis)
+  }, [boundDevEuis])
+
   const rooms = useMemo(
     () => (typeof activeFloor === 'number' ? resolveRooms(project, activeBuilding, activeFloor) : []),
     [project, activeBuilding, activeFloor],
@@ -114,6 +143,7 @@ function App() {
       const source: SensorSource = {
         sensorId: device.id,
         measures: model?.measures ?? (device.type === 'sensor' ? ['temperatura', 'humidade'] : []),
+        devEui: device.devEui,
       }
       for (const room of rooms) {
         if (pointInRoom(room, device.x, device.z)) {
@@ -467,6 +497,7 @@ function App() {
         onNewProject={handleNewProject}
         onResetView={() => setResetSignal((v) => v + 1)}
         onRelatorio={abrirRelatorio}
+        onLns={ehDesktop() ? () => setLnsPanelAberto((v) => !v) : undefined}
         savedLabel={
           ehDesktop()
             ? ficheiroAtual
@@ -547,8 +578,28 @@ function App() {
             onQualidade={mudarQualidade}
             mapaCalorVisivel={mapaCalorVisivel}
             onToggleMapaCalor={() => setMapaCalorVisivel((v) => !v)}
+            lnsDispositivos={lnsDispositivos}
+            lnsReadings={lnsReadings}
           />
         </DraggablePanel>
+
+        {lnsPanelAberto && (
+          <DraggablePanel
+            title="Ligacao LNS"
+            icon={<SignalIcon size={15} />}
+            defaultPosition={lnsPanelPosition}
+            width={320}
+            storageKey="maqo.panel.lns"
+          >
+            <LnsPanel
+              devices={project.devices}
+              lnsReadings={lnsReadings}
+              lnsDispositivos={lnsDispositivos}
+              onListarDispositivos={atualizarDispositivosLns}
+              onClose={() => setLnsPanelAberto(false)}
+            />
+          </DraggablePanel>
+        )}
 
         <main className="viewport-area">
           <BuildingTabs
@@ -586,6 +637,7 @@ function App() {
                 rooms={rooms}
                 telemetryTick={telemetryTick}
                 sensorsByRoom={sensorsByRoom}
+                liveReadings={liveReadings}
                 onSelectDevice={setSelectedDeviceId}
                 onPlaceInterior={(floor, x, z) => placementType && addDevice(placementType, 'interior', floor, x, z, placementModelId)}
                 onPlaceRoof={(x, z) => placementType && addDevice(placementType, 'roof', null, x, z, placementModelId)}
@@ -609,6 +661,7 @@ function App() {
                   rooms={rooms}
                   sensorsByRoom={sensorsByRoom}
                   telemetryTick={telemetryTick}
+                  liveReadings={liveReadings}
                   selectedId={selectedDeviceId}
                   placementMode={placementType !== null}
                   coverageVisible={coverageVisible}
@@ -630,6 +683,7 @@ function App() {
               rooms={rooms}
               telemetryTick={telemetryTick}
               sensorsByRoom={sensorsByRoom}
+              liveReadings={liveReadings}
               floorLabel={activeFloor === 0 ? 'Res-do-chao' : `Piso ${activeFloor}`}
             />
           )}

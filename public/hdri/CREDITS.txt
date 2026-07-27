@@ -1,0 +1,6 @@
+HDRI environment maps — CC0 (public domain), no attribution required, credited here as good practice.
+Source: Poly Haven (https://polyhaven.com)
+
+day.hdr   -> "Wide Street 01"          https://polyhaven.com/a/wide_street_01
+dusk.hdr  -> "Venice Sunset"           https://polyhaven.com/a/venice_sunset
+night.hdr -> "Cobblestone Street Night" https://polyhaven.com/a/cobblestone_street_night

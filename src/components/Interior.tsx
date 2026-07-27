@@ -1,6 +1,13 @@
 import { Fragment } from 'react'
 import { Html } from '@react-three/drei'
-import { roomClimateFromSensors, statusColors, type Room, type RoomClimate, type SensorSource } from '../rooms'
+import {
+  roomClimateFromSensors,
+  statusColors,
+  type LiveReadings,
+  type Room,
+  type RoomClimate,
+  type SensorSource,
+} from '../rooms'
 import type { BuildingConfig } from '../types'
 
 interface InteriorFloorProps {
@@ -10,6 +17,7 @@ interface InteriorFloorProps {
   telemetryTick: number
   labelsVisible: boolean
   sensorsByRoom: Map<string, SensorSource[]>
+  liveReadings?: LiveReadings
 }
 
 const PARTITION_H = 1.55
@@ -24,6 +32,7 @@ export function InteriorFloor({
   telemetryTick,
   labelsVisible,
   sensorsByRoom,
+  liveReadings,
 }: InteriorFloorProps) {
   const y0 = floorIndex * building.floorHeight
 
@@ -35,7 +44,7 @@ export function InteriorFloor({
       </mesh>
 
       {rooms.map((room) => {
-        const climate = roomClimateFromSensors(sensorsByRoom.get(room.id) ?? [], telemetryTick)
+        const climate = roomClimateFromSensors(sensorsByRoom.get(room.id) ?? [], telemetryTick, liveReadings)
         const color = statusColors[climate.status]
 
         return (

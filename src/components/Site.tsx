@@ -1,17 +1,9 @@
 import { useMemo } from 'react'
-import { Instance, Instances } from '@react-three/drei'
+import { Instance, Instances, MeshReflectorMaterial } from '@react-three/drei'
 import type { BuildingConfig } from '../types'
 import { createRng, generateSite, type SiteLayout } from '../buildingGenerator'
 import * as THREE from 'three'
-import {
-  getAsphaltNormal,
-  getAsphaltTexture,
-  getConcreteNormal,
-  getConcreteTexture,
-  getGrassNormal,
-  getGrassTexture,
-  setRepeat,
-} from '../textures'
+import { getAsphaltMaps, getGrassMaps, getPlazaMaps } from '../textures'
 import type { TimeOfDay } from './Scene3D'
 
 interface SiteProps {
@@ -23,11 +15,8 @@ interface SiteProps {
 
 const TILE = 2.2
 
-function cloneWithRepeat(base: ReturnType<typeof getAsphaltTexture>, width: number, depth: number, tile = TILE) {
-  const texture = base.clone()
-  texture.needsUpdate = true
-  setRepeat(texture, Math.max(1, width / tile), Math.max(1, depth / tile))
-  return texture
+function repeatFor(size: number, tile = TILE) {
+  return Math.max(1, size / tile)
 }
 
 export function Site({ building, seed, timeOfDay, minGroundHalf = 0 }: SiteProps) {
@@ -41,30 +30,26 @@ export function Site({ building, seed, timeOfDay, minGroundHalf = 0 }: SiteProps
   const plazaW = building.width + site.walkMargin * 2
   const plazaD = building.depth + site.walkMargin * 2
 
-  const grassMaps = useMemo(() => {
-    const map = cloneWithRepeat(getGrassTexture(), lawnW, lawnD, TILE * 1.4)
-    const normal = cloneWithRepeat(getGrassNormal(), lawnW, lawnD, TILE * 1.4)
-    return { map, normal }
-  }, [lawnW, lawnD])
+  const grassMaps = useMemo(
+    () => getGrassMaps(repeatFor(lawnW, TILE * 1.4), repeatFor(lawnD, TILE * 1.4)),
+    [lawnW, lawnD],
+  )
 
-  const plazaMaps = useMemo(() => {
-    const map = cloneWithRepeat(getConcreteTexture(), plazaW, plazaD, TILE * 1.6)
-    const normal = cloneWithRepeat(getConcreteNormal(), plazaW, plazaD, TILE * 1.6)
-    return { map, normal }
-  }, [plazaW, plazaD])
+  const plazaMaps = useMemo(
+    () => getPlazaMaps(repeatFor(plazaW, TILE * 1.6), repeatFor(plazaD, TILE * 1.6)),
+    [plazaW, plazaD],
+  )
 
-  const drivewayMap = useMemo(
-    () => cloneWithRepeat(getAsphaltTexture(), site.driveway.width, site.driveway.depth),
+  const drivewayMaps = useMemo(
+    () => getAsphaltMaps(repeatFor(site.driveway.width), repeatFor(site.driveway.depth)),
     [site.driveway.width, site.driveway.depth],
   )
-  const streetMaps = useMemo(() => {
-    const map = cloneWithRepeat(getAsphaltTexture(), site.street.width, site.street.depth)
-    const normal = cloneWithRepeat(getAsphaltNormal(), site.street.width, site.street.depth)
-    return { map, normal }
-  }, [site.street.width, site.street.depth])
-  const parkingMap = useMemo(
-    () =>
-      site.parkingLot ? cloneWithRepeat(getAsphaltTexture(), site.parkingLot.width, site.parkingLot.depth) : null,
+  const streetMaps = useMemo(
+    () => getAsphaltMaps(repeatFor(site.street.width), repeatFor(site.street.depth)),
+    [site.street.width, site.street.depth],
+  )
+  const parkingMaps = useMemo(
+    () => (site.parkingLot ? getAsphaltMaps(repeatFor(site.parkingLot.width), repeatFor(site.parkingLot.depth)) : null),
     [site.parkingLot],
   )
 
@@ -80,20 +65,36 @@ export function Site({ building, seed, timeOfDay, minGroundHalf = 0 }: SiteProps
           map={grassMaps.map}
           normalMap={grassMaps.normal}
           normalScale={new THREE.Vector2(0.7, 0.7)}
-          color="#ffffff"
+          roughnessMap={grassMaps.roughnessMap}
+          // the real scan leans brown/leaf-litter; a light green multiply
+          // pushes it back toward a kept lawn without losing the photo detail
+          color="#a9d488"
           roughness={1}
         />
       </mesh>
 
+      {/* Faint reflector rather than a mirror: real polished concrete/pavers pick up
+          soft blurred shapes of nearby facades and sky, not a clean mirror image. */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, 0]} receiveShadow>
         <planeGeometry args={[plazaW, plazaD]} />
-        <meshStandardMaterial
+        <MeshReflectorMaterial
           map={plazaMaps.map}
           normalMap={plazaMaps.normal}
           normalScale={new THREE.Vector2(0.35, 0.35)}
+          roughnessMap={plazaMaps.roughnessMap}
           color="#ffffff"
           roughness={0.92}
           envMapIntensity={0.7}
+          mirror={0}
+          blur={[400, 120]}
+          mixBlur={9}
+          mixStrength={1.4}
+          mixContrast={1.1}
+          resolution={512}
+          depthScale={1}
+          minDepthThreshold={0.85}
+          maxDepthThreshold={1.4}
+          metalness={0}
         />
       </mesh>
 
@@ -101,7 +102,15 @@ export function Site({ building, seed, timeOfDay, minGroundHalf = 0 }: SiteProps
 
       <mesh position={[site.driveway.x, 0.012, site.driveway.z]} receiveShadow>
         <boxGeometry args={[site.driveway.width, 0.024, site.driveway.depth]} />
-        <meshStandardMaterial map={drivewayMap} color="#ffffff" roughness={0.82} envMapIntensity={0.5} />
+        <meshStandardMaterial
+          map={drivewayMaps.map}
+          normalMap={drivewayMaps.normal}
+          normalScale={new THREE.Vector2(0.5, 0.5)}
+          roughnessMap={drivewayMaps.roughnessMap}
+          color="#ffffff"
+          roughness={0.82}
+          envMapIntensity={0.5}
+        />
       </mesh>
 
       <mesh position={[site.street.x, 0.018, site.street.z]} receiveShadow>
@@ -110,6 +119,7 @@ export function Site({ building, seed, timeOfDay, minGroundHalf = 0 }: SiteProps
           map={streetMaps.map}
           normalMap={streetMaps.normal}
           normalScale={new THREE.Vector2(0.5, 0.5)}
+          roughnessMap={streetMaps.roughnessMap}
           color="#ffffff"
           roughness={0.78}
           envMapIntensity={0.5}
@@ -131,7 +141,14 @@ export function Site({ building, seed, timeOfDay, minGroundHalf = 0 }: SiteProps
         <>
           <mesh position={[site.parkingLot.x, 0.014, site.parkingLot.z]} receiveShadow>
             <boxGeometry args={[site.parkingLot.width, 0.028, site.parkingLot.depth]} />
-            <meshStandardMaterial map={parkingMap} color="#ffffff" roughness={0.9} />
+            <meshStandardMaterial
+              map={parkingMaps?.map}
+              normalMap={parkingMaps?.normal}
+              normalScale={new THREE.Vector2(0.5, 0.5)}
+              roughnessMap={parkingMaps?.roughnessMap}
+              color="#ffffff"
+              roughness={0.9}
+            />
           </mesh>
           {site.parking.map((spot, i) => (
             <mesh key={i} position={[spot.x, 0.032, spot.z]}>

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require('electron')
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell, safeStorage } = require('electron')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 
@@ -8,6 +8,8 @@ const {
   INTERVALO_VERIFICACAO_MS,
   verificarRevogacaoComTolerancia,
 } = require('./licenca-remota.cjs')
+const lnsArmazenamento = require('./lns-armazenamento.cjs')
+const lnsChirpstack = require('./lns-chirpstack.cjs')
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL
 const ehDev = !!DEV_URL
@@ -170,6 +172,81 @@ ipcMain.handle('relatorio:pdf', async (_evento, nomeSugerido) => {
     dialog.showErrorBox('Nao foi possivel gerar o PDF', String(erro.message ?? erro))
     return { ok: false }
   }
+})
+
+// ------------------------------------------------------------------------ lns
+
+/**
+ * Ligacao a um ChirpStack real, guardada por instalacao (nao no ficheiro de
+ * projeto — ver electron/lns-armazenamento.cjs). O polling so corre com uma
+ * ligacao configurada E pelo menos um devEui subscrito: sem sensores
+ * associados no projeto aberto, zero pedidos HTTP saem daqui.
+ */
+let ligacaoLns = null
+let subscricoesLns = new Set()
+let temporizadorLns = null
+const INTERVALO_POLLING_LNS_MS = 20_000
+
+/** Nunca inclui o apiToken — e o unico estado que o renderer pode ler. */
+function estadoLigacaoPublico() {
+  if (!ligacaoLns) return { configurado: false }
+  return { configurado: true, baseUrl: ligacaoLns.baseUrl, applicationId: ligacaoLns.applicationId }
+}
+
+async function cicloPollingLns() {
+  if (!ligacaoLns || subscricoesLns.size === 0 || !janela) return
+  const leituras = await lnsChirpstack.obterLeituras(ligacaoLns, [...subscricoesLns])
+  janela.webContents.send('lns:leitura', leituras)
+}
+
+function ajustarTemporizadorLns() {
+  const deveCorrer = ligacaoLns && subscricoesLns.size > 0
+  if (deveCorrer && !temporizadorLns) {
+    temporizadorLns = setInterval(cicloPollingLns, INTERVALO_POLLING_LNS_MS)
+    cicloPollingLns() // primeira leitura logo, sem esperar pelo primeiro intervalo
+  } else if (!deveCorrer && temporizadorLns) {
+    clearInterval(temporizadorLns)
+    temporizadorLns = null
+  }
+}
+
+ipcMain.handle('lns:guardar-ligacao', (_evento, dados) => {
+  if (!safeStorage.isEncryptionAvailable()) {
+    return { ok: false, motivo: 'Este sistema nao suporta armazenamento encriptado.' }
+  }
+  const guardou = lnsArmazenamento.guardarLigacao(safeStorage, app.getPath('userData'), dados)
+  if (!guardou) return { ok: false, motivo: 'Nao foi possivel guardar a ligacao.' }
+  ligacaoLns = dados
+  ajustarTemporizadorLns()
+  return { ok: true }
+})
+
+ipcMain.handle('lns:obter-ligacao', () => estadoLigacaoPublico())
+
+ipcMain.handle('lns:remover-ligacao', () => {
+  lnsArmazenamento.removerLigacao(app.getPath('userData'))
+  ligacaoLns = null
+  ajustarTemporizadorLns()
+  return true
+})
+
+// Aceita dados opcionais para testar antes de guardar (ecra de ligacao); sem
+// argumentos, testa a ligacao ja guardada.
+ipcMain.handle('lns:testar-ligacao', async (_evento, dados) => lnsChirpstack.testarLigacao(dados ?? ligacaoLns))
+
+ipcMain.handle('lns:listar-dispositivos', async () => {
+  if (!ligacaoLns) return { ok: false, motivo: 'Sem ligacao configurada.' }
+  try {
+    const dispositivos = await lnsChirpstack.listarDispositivos(ligacaoLns)
+    return { ok: true, dispositivos }
+  } catch (erro) {
+    return { ok: false, motivo: String(erro.message ?? erro) }
+  }
+})
+
+ipcMain.handle('lns:definir-subscricoes', (_evento, devEuis) => {
+  subscricoesLns = new Set(devEuis)
+  ajustarTemporizadorLns()
 })
 
 // -------------------------------------------------------------------- window
@@ -338,6 +415,11 @@ function iniciarVerificacaoPeriodica() {
 
 app.whenReady().then(async () => {
   const userDataPath = app.getPath('userData')
+
+  if (safeStorage.isEncryptionAvailable()) {
+    ligacaoLns = lnsArmazenamento.ligacaoGuardada(safeStorage, userDataPath)
+  }
+
   const guardada = licencaGuardada(userDataPath)
 
   if (!guardada) {

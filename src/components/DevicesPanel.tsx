@@ -25,6 +25,8 @@ import { ModelGallery, ModelPicker, ModelSpecSheet } from './ModelSpecs'
 import { perfisDeQualidade, type Qualidade } from '../qualidade'
 import { calcularMapaCalor, escalaMapaCalor } from '../heatmap'
 import { DeviceArtwork } from './DeviceArtwork'
+import type { LnsDispositivo } from '../desktop'
+import type { LnsReadingEntry } from '../lns'
 import {
   GatewayIcon,
   SensorIcon,
@@ -79,6 +81,8 @@ interface DevicesPanelProps {
   onQualidade?: (q: Qualidade) => void
   mapaCalorVisivel?: boolean
   onToggleMapaCalor?: () => void
+  lnsDispositivos?: LnsDispositivo[]
+  lnsReadings?: Map<string, LnsReadingEntry>
 }
 
 export function DevicesPanel({
@@ -108,6 +112,8 @@ export function DevicesPanel({
   onQualidade,
   mapaCalorVisivel = false,
   onToggleMapaCalor,
+  lnsDispositivos = [],
+  lnsReadings,
 }: DevicesPanelProps) {
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId) ?? null
   const [tab, setTab] = useState<PanelTab>('colocar')
@@ -364,6 +370,8 @@ export function DevicesPanel({
             devices={devices}
             propagation={propagation}
             uplinkMinutes={uplinkMinutes}
+            lnsDispositivos={lnsDispositivos}
+            lnsReadings={lnsReadings}
             onUpdate={(patch) => onUpdateDevice(selectedDevice.id, patch)}
             onDelete={() => onDeleteDevice(selectedDevice.id)}
             onFocusFloor={onChangeFloor}
@@ -386,6 +394,8 @@ function DeviceInspector({
   devices,
   propagation,
   uplinkMinutes,
+  lnsDispositivos = [],
+  lnsReadings,
   onUpdate,
   onDelete,
   onFocusFloor,
@@ -395,6 +405,8 @@ function DeviceInspector({
   devices: DeviceItem[]
   propagation: Propagation
   uplinkMinutes: number
+  lnsDispositivos?: LnsDispositivo[]
+  lnsReadings?: Map<string, LnsReadingEntry>
   onUpdate: (patch: Partial<DeviceItem>) => void
   onDelete: () => void
   onFocusFloor: (floor: FloorSelector) => void
@@ -513,6 +525,42 @@ function DeviceInspector({
       >
         Repor raio do modelo
       </button>
+
+      {device.type === 'sensor' && (
+        <>
+          <label>
+            DevEUI (LNS)
+            <input
+              type="text"
+              value={device.devEui ?? ''}
+              onChange={(event) => onUpdate({ devEui: event.target.value.trim() || undefined })}
+              placeholder="Ex: 24e124126c123456"
+            />
+          </label>
+          {lnsDispositivos.length > 0 && (
+            <label>
+              Escolher dispositivo descoberto
+              <select value="" onChange={(event) => event.target.value && onUpdate({ devEui: event.target.value })}>
+                <option value="">Selecionar...</option>
+                {lnsDispositivos.map((d) => (
+                  <option key={d.devEui} value={d.devEui}>
+                    {d.nome} — {d.devEui}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {device.devEui && (
+            <p className="panel-hint">
+              <span
+                className="metric-dot"
+                style={{ background: lnsReadings?.has(device.devEui) ? '#22c55e' : '#5b6472' }}
+              />
+              {lnsReadings?.has(device.devEui) ? 'Dados em tempo real' : 'Sem leitura recente do LNS'}
+            </p>
+          )}
+        </>
+      )}
 
       <label>
         Notas

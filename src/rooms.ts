@@ -135,7 +135,12 @@ export interface SensorSource {
   sensorId: string
   /** what the model placed in this room can actually measure */
   measures: Measurement[]
+  /** DevEUI in a connected LNS, when this sensor is bound to a real device */
+  devEui?: string
 }
+
+/** Live values received from an LNS for one device, keyed by Measurement. */
+export type LiveReadings = Map<string, Partial<Record<Measurement, number>>>
 
 export interface RoomReading {
   measurement: Measurement
@@ -170,15 +175,21 @@ const NO_DATA: RoomClimate = {
   readings: [],
 }
 
-/** Averages one measurement across every sensor in the room that supports it. */
-function average(sources: SensorSource[], measurement: Measurement, tick: number) {
+/**
+ * Averages one measurement across every sensor in the room that supports it.
+ * A sensor bound to a live LNS device (`devEui`) uses its real last reading
+ * for that measurement when one has arrived; otherwise every sensor falls
+ * back to the deterministic simulation, exactly as before a connection exists.
+ */
+function average(sources: SensorSource[], measurement: Measurement, tick: number, liveReadings: LiveReadings) {
   const capable = sources.filter((s) => s.measures.includes(measurement))
   if (capable.length === 0) return null
   let sum = 0
   let count = 0
   for (const source of capable) {
-    const value = sensorReading(measurement, source.sensorId, tick)
-    if (value !== null) {
+    const live = source.devEui ? liveReadings.get(source.devEui)?.[measurement] : undefined
+    const value = live ?? sensorReading(measurement, source.sensorId, tick)
+    if (value !== null && value !== undefined) {
       sum += value
       count += 1
     }
@@ -186,27 +197,33 @@ function average(sources: SensorSource[], measurement: Measurement, tick: number
   return count === 0 ? null : { value: sum / count, sources: count }
 }
 
+const NO_LIVE_READINGS: LiveReadings = new Map()
+
 /**
  * A room's environment comes ONLY from the sensors physically placed inside it.
  * With no temperature-capable model in the room, it reports "sem dados".
  */
-export function roomClimateFromSensors(sources: SensorSource[], tick: number): RoomClimate {
-  const temp = average(sources, 'temperatura', tick)
+export function roomClimateFromSensors(
+  sources: SensorSource[],
+  tick: number,
+  liveReadings: LiveReadings = NO_LIVE_READINGS,
+): RoomClimate {
+  const temp = average(sources, 'temperatura', tick, liveReadings)
   if (!temp) {
     return { ...NO_DATA, sensorCount: sources.length }
   }
 
   const readings: RoomReading[] = []
   for (const measurement of primaryMeasurements) {
-    const agg = average(sources, measurement, tick)
+    const agg = average(sources, measurement, tick, liveReadings)
     if (!agg) continue
     const value = Math.round(agg.value * 100) / 100
     readings.push({ measurement, value, status: readingStatus(measurement, value), sources: agg.sources })
   }
 
   const temperature = temp.value
-  const humidity = average(sources, 'humidade', tick)?.value ?? null
-  const co2 = average(sources, 'co2', tick)?.value ?? null
+  const humidity = average(sources, 'humidade', tick, liveReadings)?.value ?? null
+  const co2 = average(sources, 'co2', tick, liveReadings)?.value ?? null
 
   // 24 h band, derived from the same deterministic wave the live value rides on
   const min24 = temperature - 1.4

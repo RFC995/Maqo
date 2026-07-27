@@ -11,7 +11,7 @@ import {
   generateRoofEquipment,
   styleConfigs,
 } from '../buildingGenerator'
-import { getGravelNormal, getGravelTexture, getWallNormal, getWallNoiseTexture, setRepeat } from '../textures'
+import { getRoofMaps, getWallMaps } from '../textures'
 
 interface BuildingModelProps {
   building: BuildingConfig
@@ -74,29 +74,15 @@ export function BuildingModel({ building, seed, activeFloor, litBoost }: Buildin
   const halfW = building.width / 2
   const halfD = building.depth / 2
 
-  const wallMaps = useMemo(() => {
-    const rx = Math.max(1, building.width / 3.2)
-    const ry = Math.max(1, building.floorHeight / 1.6)
-    const map = getWallNoiseTexture().clone()
-    map.needsUpdate = true
-    setRepeat(map, rx, ry)
-    const normal = getWallNormal().clone()
-    normal.needsUpdate = true
-    setRepeat(normal, rx, ry)
-    return { map, normal }
-  }, [building.width, building.floorHeight])
+  const wallMaps = useMemo(
+    () => getWallMaps(Math.max(1, building.width / 3.2), Math.max(1, building.floorHeight / 1.6)),
+    [building.width, building.floorHeight],
+  )
 
-  const roofMaps = useMemo(() => {
-    const rx = Math.max(1, building.width / 5)
-    const ry = Math.max(1, building.depth / 5)
-    const map = getGravelTexture().clone()
-    map.needsUpdate = true
-    setRepeat(map, rx, ry)
-    const normal = getGravelNormal().clone()
-    normal.needsUpdate = true
-    setRepeat(normal, rx, ry)
-    return { map, normal }
-  }, [building.width, building.depth])
+  const roofMaps = useMemo(
+    () => getRoofMaps(Math.max(1, building.width / 5), Math.max(1, building.depth / 5)),
+    [building.width, building.depth],
+  )
 
   return (
     <group>
@@ -134,6 +120,7 @@ export function BuildingModel({ building, seed, activeFloor, litBoost }: Buildin
                       map={wallMaps.map}
                       normalMap={wallMaps.normal}
                       normalScale={wallNormalScale}
+                      roughnessMap={wallMaps.roughnessMap}
                       color={wallColor}
                       roughness={wallRoughness}
                       metalness={0.05}
@@ -273,6 +260,7 @@ export function BuildingModel({ building, seed, activeFloor, litBoost }: Buildin
             map={roofMaps.map}
             normalMap={roofMaps.normal}
             normalScale={roofNormalScale}
+            roughnessMap={roofMaps.roughnessMap}
             color="#c8ccd4"
             roughness={0.98}
           />

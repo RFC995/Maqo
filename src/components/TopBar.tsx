@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import type { TimeOfDay } from './Scene3D'
-import { DownloadIcon, UploadIcon, SunIcon, DuskIcon, MoonIcon, TargetIcon, PlusIcon, ReportIcon } from './icons'
+import { DownloadIcon, UploadIcon, SunIcon, DuskIcon, MoonIcon, TargetIcon, PlusIcon, ReportIcon, SignalIcon } from './icons'
 
 interface TopBarProps {
   projectName: string
@@ -12,6 +12,8 @@ interface TopBarProps {
   onNewProject: () => void
   onResetView: () => void
   onRelatorio: () => void
+  /** absent in the browser build — the LNS bridge only exists inside Electron */
+  onLns?: () => void
   savedLabel: string
 }
 
@@ -31,6 +33,7 @@ export function TopBar({
   onNewProject,
   onResetView,
   onRelatorio,
+  onLns,
   savedLabel,
 }: TopBarProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -74,6 +77,12 @@ export function TopBar({
           <ReportIcon size={16} />
           <span>Relatorio</span>
         </button>
+        {onLns && (
+          <button type="button" className="icon-btn" onClick={onLns} title="Ligar a um Network Server (ChirpStack)">
+            <SignalIcon size={16} />
+            <span>LNS</span>
+          </button>
+        )}
 
         <button type="button" className="icon-btn" onClick={onExport} title="Exportar projeto (.json)">
           <DownloadIcon size={16} />

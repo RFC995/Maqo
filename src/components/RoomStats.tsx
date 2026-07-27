@@ -1,4 +1,4 @@
-import { roomClimateFromSensors, statusColors, type Room, type SensorSource } from '../rooms'
+import { roomClimateFromSensors, statusColors, type LiveReadings, type Room, type SensorSource } from '../rooms'
 import { measurementLabels } from '../catalog'
 import { formatReading, readingStatusColors } from '../telemetry'
 
@@ -6,11 +6,15 @@ interface RoomStatsProps {
   rooms: Room[]
   telemetryTick: number
   sensorsByRoom: Map<string, SensorSource[]>
+  liveReadings?: LiveReadings
   floorLabel: string
 }
 
-export function RoomStats({ rooms, telemetryTick, sensorsByRoom, floorLabel }: RoomStatsProps) {
+export function RoomStats({ rooms, telemetryTick, sensorsByRoom, liveReadings, floorLabel }: RoomStatsProps) {
   const monitored = rooms.filter((r) => (sensorsByRoom.get(r.id)?.length ?? 0) > 0)
+  const temDadosReais = [...sensorsByRoom.values()].some((sources) =>
+    sources.some((s) => s.devEui && liveReadings?.has(s.devEui)),
+  )
 
   return (
     <div className="room-stats">
@@ -18,14 +22,14 @@ export function RoomStats({ rooms, telemetryTick, sensorsByRoom, floorLabel }: R
         <span>Ambiente &middot; {floorLabel}</span>
         <span className="room-stats-note">
           {monitored.length > 0
-            ? `${monitored.length} sala(s) monitorizada(s) · valores simulados`
+            ? `${monitored.length} sala(s) monitorizada(s) · ${temDadosReais ? 'dados em tempo real (LNS)' : 'valores simulados'}`
             : 'coloca sensores nas salas para ver dados'}
         </span>
       </div>
       <div className="room-stats-track">
         {rooms.map((room) => {
           const sources = sensorsByRoom.get(room.id) ?? []
-          const climate = roomClimateFromSensors(sources, telemetryTick)
+          const climate = roomClimateFromSensors(sources, telemetryTick, liveReadings)
           const color = statusColors[climate.status]
           return (
             <div key={room.id} className={climate.hasData ? 'room-card' : 'room-card empty'} style={{ borderColor: color }}>
