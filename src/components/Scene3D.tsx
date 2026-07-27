@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls, Sky, Stars, ContactShadows, Environment, Lightformer, SoftShadows } from '@react-three/drei'
 import {
@@ -7,19 +7,23 @@ import {
   N8AO,
   ToneMapping,
   Vignette,
-
+  TiltShift2,
   BrightnessContrast,
   HueSaturation,
 } from '@react-three/postprocessing'
 import { ToneMappingMode } from 'postprocessing'
 import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
-import type { Building, BuildingConfig, DeviceItem, FloorSelector } from '../types'
+import type { Building, BuildingConfig, Cenario, DeviceItem, FloorSelector } from '../types'
 import { buildingTopY, computePlotSize } from '../buildingGenerator'
 import { campusBounds } from '../buildings'
 import type { Room, SensorSource } from '../rooms'
 import { BuildingModel } from './Building'
 import { Site } from './Site'
+import { CityContext } from './CityContext'
+import { cityHalfExtent } from '../cityGenerator'
+import { ParkingLot } from './ParkingLot'
+import { Farm } from './Farm'
 import { DeviceMarkers } from './DeviceMarkers'
 import { defaultPropagation as defaultPropagationRf, type Propagation } from '../rf'
 import { InteriorFloor } from './Interior'
@@ -31,6 +35,7 @@ export type TimeOfDay = 'day' | 'dusk' | 'night'
 
 interface Scene3DProps {
   buildings: Building[]
+  scenario: Cenario
   activeBuildingId: string
   seed: number
   devices: DeviceItem[]
@@ -298,6 +303,7 @@ function translateFraming(framing: CameraFraming, site: { x: number; z: number }
 
 export function Scene3D({
   buildings,
+  scenario,
   activeBuildingId,
   seed,
   devices,
@@ -336,10 +342,15 @@ export function Scene3D({
   // (`max(width,depth) * 1.6 + 30`, generous enough to cover the surrounding
   // Site grounds too), plus how far that building's own site offset sits
   // from the origin.
+  // building scenarios get a surrounding procedural city (with real wall
+  // textures); parking/farm keep their own dedicated worlds
+  const buildingScenario = scenario !== 'parking' && scenario !== 'agricultura'
   const shadowSpan = Math.max(
     ...buildings.map(
       (b) => Math.max(Math.abs(b.site.x), Math.abs(b.site.z)) + Math.max(b.config.width, b.config.depth) * 1.6 + 30,
     ),
+    // stretch the shadow frustum over the city so its blocks cast/receive shadows
+    buildingScenario ? cityHalfExtent(activeBuilding.config) : 0,
   )
   const contactShadowsScale = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) + 40
 
@@ -402,32 +413,47 @@ export function Scene3D({
 
       <SceneEnvironment timeOfDay={timeOfDay} preset={preset} sun={preset.sun} />
 
+      <Suspense fallback={null}>
       {buildings.map((b) => {
         const isActive = b.id === activeBuildingId
         const buildingDevices = devices.filter((d) => d.buildingId === b.id)
         return (
           <group key={b.id} position={[b.site.x, 0, b.site.z]}>
-            <Site
-              building={b.config}
-              seed={seed}
-              timeOfDay={timeOfDay}
-              minGroundHalf={isActive ? maxCoverageRadius * 1.15 : 0}
-            />
-            <BuildingModel
-              building={b.config}
-              seed={seed}
-              activeFloor={isActive ? activeFloor : 'all'}
-              litBoost={preset.litBoost}
-            />
-            {isActive && typeof activeFloor === 'number' && (
-              <InteriorFloor
+            {scenario === 'parking' ? (
+              <ParkingLot
                 building={b.config}
-                floorIndex={activeFloor}
-                rooms={rooms}
+                seed={seed}
+                timeOfDay={timeOfDay}
+                devices={buildingDevices}
                 telemetryTick={telemetryTick}
-                labelsVisible={labelsVisible}
-                sensorsByRoom={sensorsByRoom}
               />
+            ) : scenario === 'agricultura' ? (
+              <Farm building={b.config} seed={seed} timeOfDay={timeOfDay} />
+            ) : (
+              <>
+                <Site
+                  building={b.config}
+                  seed={seed}
+                  timeOfDay={timeOfDay}
+                  minGroundHalf={isActive ? maxCoverageRadius * 1.15 : 0}
+                />
+                <BuildingModel
+                  building={b.config}
+                  seed={seed}
+                  activeFloor={isActive ? activeFloor : 'all'}
+                  litBoost={preset.litBoost}
+                />
+                {isActive && typeof activeFloor === 'number' && (
+                  <InteriorFloor
+                    building={b.config}
+                    floorIndex={activeFloor}
+                    rooms={rooms}
+                    telemetryTick={telemetryTick}
+                    labelsVisible={labelsVisible}
+                    sensorsByRoom={sensorsByRoom}
+                  />
+                )}
+              </>
             )}
             <DeviceMarkers
               devices={buildingDevices}
@@ -470,6 +496,15 @@ export function Scene3D({
           </group>
         )
       })}
+      </Suspense>
+
+      {buildingScenario && (
+        <Suspense fallback={null}>
+          <group position={[activeBuilding.site.x, 0, activeBuilding.site.z]}>
+            <CityContext building={activeBuilding.config} seed={seed} timeOfDay={timeOfDay} />
+          </group>
+        </Suspense>
+      )}
 
       <ContactShadows
         position={[bounds.centerX, 0.02, bounds.centerZ]}
@@ -481,7 +516,7 @@ export function Scene3D({
 
       <CameraRig buildings={buildings} activeBuildingId={activeBuildingId} activeFloor={activeFloor} resetSignal={resetSignal} />
 
-      <PosProcessamento preset={preset} perfil={perfil} />
+      <PosProcessamento preset={preset} perfil={perfil} overview={activeFloor === 'all'} />
       <RegistoDeCaptura />
     </Canvas>
   )
@@ -552,9 +587,12 @@ function RegistoDeCaptura() {
 function PosProcessamento({
   preset,
   perfil,
+  overview,
 }: {
   preset: (typeof lightPresets)['day']
   perfil: PerfilQualidade
+  /** true in "vista geral" — the miniature tilt-shift is strongest here */
+  overview: boolean
 }) {
   const gl = useThree((estado) => estado.gl)
   const [ativo, setAtivo] = useState(false)
@@ -612,6 +650,16 @@ function PosProcessamento({
         luminanceSmoothing={0.28}
         intensity={preset.bloomIntensity}
         radius={0.72}
+      />
+      {/* tilt-shift: a sharp horizontal band with the ground/sky blurred away
+          reads the whole scene as a physical scale model (maquette). Stronger in
+          the overview, gentle when zoomed into a single floor. */}
+      <TiltShift2
+        blur={overview ? 0.16 : 0.06}
+        taper={0.42}
+        start={[0, 0.42]}
+        end={[1, 0.42]}
+        samples={10}
       />
       <ToneMapping mode={ToneMappingMode.AGX} />
       <HueSaturation saturation={preset.grade.saturation} hue={0} />

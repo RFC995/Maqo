@@ -19,6 +19,21 @@ contextBridge.exposeInMainWorld('maqo', {
   // report
   guardarRelatorioPdf: (nomeSugerido) => ipcRenderer.invoke('relatorio:pdf', nomeSugerido),
 
+  // TTN / ChirpStack integration
+  integracaoLigar: (config) => ipcRenderer.invoke('integracao:ligar', config),
+  integracaoDesligar: () => ipcRenderer.invoke('integracao:desligar'),
+  integracaoEstado: () => ipcRenderer.invoke('integracao:estado'),
+  aoUplinkIntegracao: (callback) => {
+    const handler = (_evento, payload) => callback(payload)
+    ipcRenderer.on('integracao:uplink', handler)
+    return () => ipcRenderer.off('integracao:uplink', handler)
+  },
+  aoEstadoIntegracao: (callback) => {
+    const handler = (_evento, payload) => callback(payload)
+    ipcRenderer.on('integracao:estado', handler)
+    return () => ipcRenderer.off('integracao:estado', handler)
+  },
+
   // menu events -> renderer
   aoAbrirProjeto: (callback) => {
     const handler = (_evento, payload) => callback(payload)

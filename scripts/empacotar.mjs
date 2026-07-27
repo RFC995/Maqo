@@ -14,6 +14,11 @@
 import { spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { sincronizarChavePublica } from './chaves.mjs'
+
+// the packaged app must ship the public key matching the private key that signs
+// licences — regenerate it from the private key before bundling
+sincronizarChavePublica()
 
 const argv = process.argv.slice(2)
 

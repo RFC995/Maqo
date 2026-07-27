@@ -36,8 +36,10 @@ export function Site({ building, seed, timeOfDay, minGroundHalf = 0 }: SiteProps
     return generateSite(building, rng)
   }, [building, seed])
 
-  const lawnW = Math.max(site.plotWidth + 60, minGroundHalf * 2 + 20)
-  const lawnD = Math.max(site.plotDepth + 60, minGroundHalf * 2 + 20)
+  // a compact ground so the model base reads as a maquette (edge in frame),
+  // still expanding when a large coverage radius needs the room
+  const lawnW = Math.max(site.plotWidth + 12, minGroundHalf * 2 + 16)
+  const lawnD = Math.max(site.plotDepth + 12, minGroundHalf * 2 + 16)
   const plazaW = building.width + site.walkMargin * 2
   const plazaD = building.depth + site.walkMargin * 2
 

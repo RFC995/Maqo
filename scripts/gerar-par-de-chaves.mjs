@@ -11,12 +11,7 @@
  */
 import { generateKeyPairSync } from 'node:crypto'
 import { existsSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const raiz = join(dirname(fileURLToPath(import.meta.url)), '..')
-const caminhoPrivada = join(raiz, 'chave-privada.pem')
-const caminhoPublica = join(raiz, 'electron', 'chave-publica.cjs')
+import { caminhoPrivada, caminhoPublica, conteudoChavePublica } from './chaves.mjs'
 
 if (existsSync(caminhoPrivada) && !process.argv.includes('--forcar')) {
   console.error('\nJa existe uma chave-privada.pem.')
@@ -31,17 +26,7 @@ const pemPrivada = privateKey.export({ type: 'pkcs8', format: 'pem' })
 const pemPublica = publicKey.export({ type: 'spki', format: 'pem' })
 
 writeFileSync(caminhoPrivada, pemPrivada, 'utf8')
-
-writeFileSync(
-  caminhoPublica,
-  `// GERADO por scripts/gerar-par-de-chaves.mjs - nao editar a mao.
-// Esta e a metade PUBLICA. Serve para verificar licencas, nunca para as emitir.
-const CHAVE_PUBLICA = \`${pemPublica.trim()}\`
-
-module.exports = { CHAVE_PUBLICA }
-`,
-  'utf8',
-)
+writeFileSync(caminhoPublica, conteudoChavePublica(pemPublica), 'utf8')
 
 console.log('\nPar de chaves criado.')
 console.log(`  privada -> ${caminhoPrivada}   (GUARDA ISTO, nunca partilhes)`)

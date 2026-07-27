@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import type { TimeOfDay } from './Scene3D'
+import { MaqoLogo } from './Logo'
 import { DownloadIcon, UploadIcon, SunIcon, DuskIcon, MoonIcon, TargetIcon, PlusIcon, ReportIcon } from './icons'
 
 interface TopBarProps {
@@ -7,6 +8,8 @@ interface TopBarProps {
   onRename: (name: string) => void
   timeOfDay: TimeOfDay
   onTimeOfDay: (value: TimeOfDay) => void
+  tema: 'light' | 'dark'
+  onToggleTema: () => void
   onExport: () => void
   onImport: (file: File) => void
   onNewProject: () => void
@@ -26,6 +29,8 @@ export function TopBar({
   onRename,
   timeOfDay,
   onTimeOfDay,
+  tema,
+  onToggleTema,
   onExport,
   onImport,
   onNewProject,
@@ -38,7 +43,8 @@ export function TopBar({
   return (
     <header className="topbar">
       <div className="topbar-brand">
-        <span className="brand-mark">Maqo</span>
+        <MaqoLogo size={30} subtitle="LoRaWAN Planner" />
+        <span className="topbar-sep" aria-hidden="true" />
         <input
           className="project-name-input"
           value={projectName}
@@ -66,6 +72,16 @@ export function TopBar({
       </div>
 
       <div className="topbar-actions">
+        <button
+          type="button"
+          className="icon-btn theme-toggle"
+          onClick={onToggleTema}
+          title={tema === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
+          aria-label={tema === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
+        >
+          {tema === 'dark' ? <SunIcon size={16} /> : <MoonIcon size={16} />}
+          <span>{tema === 'dark' ? 'Claro' : 'Escuro'}</span>
+        </button>
         <button type="button" className="icon-btn" onClick={onResetView} title="Repor vista">
           <TargetIcon size={16} />
           <span>Vista</span>

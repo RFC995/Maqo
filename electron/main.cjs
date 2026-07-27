@@ -8,6 +8,10 @@ const {
   INTERVALO_VERIFICACAO_MS,
   verificarRevogacaoComTolerancia,
 } = require('./licenca-remota.cjs')
+const { registarIpcIntegracao } = require('./integracao.cjs')
+
+// TTN / ChirpStack MQTT bridge — forwards uplinks to whatever window is open
+registarIpcIntegracao(ipcMain, () => janela)
 
 const DEV_URL = process.env.VITE_DEV_SERVER_URL
 const ehDev = !!DEV_URL

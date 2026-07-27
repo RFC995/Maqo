@@ -1,4 +1,6 @@
 import type { Project } from './types'
+import type { ConfigIntegracao } from './integracao'
+import type { EstadoIntegracao } from './liveStore'
 
 /**
  * Bridge to the Electron shell. Every call is a no-op in a plain browser, so
@@ -27,6 +29,15 @@ interface MaqoDesktop {
   aoAbrirProjeto: (cb: (payload: { caminho: string; conteudo: string }) => void) => () => void
   aoPedirParaGuardar: (cb: (payload: { comoNovo: boolean }) => void) => () => void
   aoNovoProjeto: (cb: () => void) => () => void
+
+  // TTN / ChirpStack integration
+  integracaoLigar: (config: ConfigIntegracao) => Promise<{ ok: boolean; motivo?: string }>
+  integracaoDesligar: () => Promise<{ ok: boolean }>
+  integracaoEstado: () => Promise<EstadoIntegracao>
+  aoUplinkIntegracao: (
+    cb: (payload: { provedor: 'ttn' | 'chirpstack'; topico: string; mensagem: string }) => void,
+  ) => () => void
+  aoEstadoIntegracao: (cb: (estado: EstadoIntegracao) => void) => () => void
 }
 
 declare global {

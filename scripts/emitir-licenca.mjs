@@ -8,10 +8,11 @@
  *
  * Prints the key to paste into the customer's activation screen.
  */
-import { createPrivateKey, randomUUID, sign } from 'node:crypto'
+import { createPrivateKey, createPublicKey, randomUUID, sign, verify } from 'node:crypto'
 import { existsSync, readFileSync, appendFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { sincronizarChavePublica, caminhoPublica } from './chaves.mjs'
 
 const raiz = join(dirname(fileURLToPath(import.meta.url)), '..')
 const caminhoPrivada = join(raiz, 'chave-privada.pem')
@@ -26,6 +27,14 @@ try {
 if (!existsSync(caminhoPrivada)) {
   console.error('\nFalta a chave-privada.pem. Corre primeiro:\n  npm run licenca:iniciar\n')
   process.exit(1)
+}
+
+// Guarantee the app's public key matches this private key BEFORE issuing, so a
+// freshly signed licence can never be rejected as "chave invalida".
+const sync = sincronizarChavePublica()
+if (sync.alterada) {
+  console.log('Aviso: a chave publica da app estava dessincronizada e foi corrigida.')
+  console.log('Se ja tens um .exe empacotado, reconstroi-o (npm run app:build) para aceitar novas chaves.\n')
 }
 
 function argumento(nome) {
@@ -62,6 +71,16 @@ const chavePrivada = createPrivateKey(readFileSync(caminhoPrivada, 'utf8'))
 const assinatura = sign(null, payload, chavePrivada)
 
 const chave = `${payload.toString('base64url')}.${assinatura.toString('base64url')}`
+
+// Safety net: confirm the shipped public key actually accepts this signature,
+// exactly as the app will. If this ever fails, the pair is broken — stop rather
+// than hand out a key that reads as invalid.
+const pemPublica = readFileSync(caminhoPublica, 'utf8').match(/`([\s\S]*?)`/)[1]
+if (!verify(null, payload, createPublicKey(pemPublica), assinatura)) {
+  console.error('\nERRO: a chave gerada nao passa na verificacao da app (par de chaves inconsistente).')
+  console.error('Corre  node scripts/chaves.mjs  e tenta de novo; se persistir, regenera o par com  npm run licenca:iniciar --forcar  (invalida licencas antigas).\n')
+  process.exit(1)
+}
 
 // wrap for readability; the app strips whitespace before verifying
 const emLinhas = chave.match(/.{1,48}/g).join('\n')

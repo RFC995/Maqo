@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import './App.css'
-import type { Building, BuildingConfig, DeviceItem, DeviceType, FloorSelector, Project } from './types'
+import type { Building, BuildingConfig, Cenario, DeviceItem, DeviceType, FloorSelector, Project } from './types'
 import { deviceLabels } from './types'
 import {
   createDefaultProject,
@@ -11,6 +11,8 @@ import {
   migrateProject,
   saveProject,
 } from './storage'
+import { cenarioMeta, criarProjetoDeCenario } from './cenarios'
+import { Onboarding } from './components/Onboarding'
 import { createBuilding } from './buildings'
 import type { PlanPreset } from './planPresets'
 import { clampRoom, createRoom, isFloorCustomised, pointInRoom, resolveRooms, type SensorSource } from './rooms'
@@ -24,13 +26,15 @@ import { RoomStats } from './components/RoomStats'
 import { NetworkPanel } from './components/NetworkPanel'
 import { RoomEditor } from './components/RoomEditor'
 import { TopBar } from './components/TopBar'
+import { IntegracaoPanel } from './components/IntegracaoPanel'
+import { useIntegracao } from './useIntegracao'
+import { atualizarBindings } from './liveStore'
 import { FloorTabs } from './components/FloorTabs'
 import { BuildingTabs } from './components/BuildingTabs'
 import { Sidebar } from './components/Sidebar'
 import type { TimeOfDay } from './components/Scene3D'
 import type { Qualidade } from './qualidade'
 import { FloorPlan2D } from './components/FloorPlan2D'
-import { DraggablePanel } from './components/DraggablePanel'
 import { DevicesPanel } from './components/DevicesPanel'
 import { GatewayIcon } from './components/icons'
 
@@ -52,6 +56,12 @@ function VistaACarregar() {
 
 function App() {
   const [project, setProject] = useState<Project>(() => loadProject() ?? createDefaultProject())
+  // first run (no saved project) opens the template picker instead of dropping
+  // straight into a default building
+  const [onboarding, setOnboarding] = useState<boolean>(() => loadProject() == null)
+  // true once the user has a real project to fall back to, so the picker can be
+  // cancelled — never on the very first run, where a choice is required
+  const [projetoConfirmado, setProjetoConfirmado] = useState<boolean>(() => loadProject() != null)
   const [activeBuildingId, setActiveBuildingId] = useState<string>(() => project.buildings[0].id)
   const [activeFloor, setActiveFloor] = useState<FloorSelector>('all')
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null)
@@ -59,6 +69,9 @@ function App() {
   const [placementType, setPlacementType] = useState<DeviceType | null>(null)
   const [placementModelId, setPlacementModelId] = useState<string>(() => defaultModelFor('gateway').id)
   const [timeOfDay, setTimeOfDay] = useState<TimeOfDay>('day')
+  const [tema, setTema] = useState<'light' | 'dark'>(
+    () => (localStorage.getItem('maqo.tema') as 'light' | 'dark' | null) ?? 'light',
+  )
   const [coverageVisible, setCoverageVisible] = useState(true)
   const [coverageOpacity, setCoverageOpacity] = useState(0.12)
   const [labelsVisible, setLabelsVisible] = useState(true)
@@ -73,12 +86,10 @@ function App() {
   const [aGerarPdf, setAGerarPdf] = useState(false)
   const [propagationPreset, setPropagationPreset] = useState('office')
   const [uplinkMinutes, setUplinkMinutes] = useState(10)
-  // opens just right of the sidebar, over the 3D view — the far right belongs to
-  // the 2D plan, which is the precision tool and must not be covered
-  const [devicesPanelPosition] = useState(() => ({ x: 336, y: 128 }))
-
   const propagation = propagationPresets[propagationPreset].value
 
+  const scenario = project.scenario
+  const vocab = cenarioMeta[scenario].vocabulario
   const activeBuilding = project.buildings.find((b) => b.id === activeBuildingId) ?? project.buildings[0]
   const building = activeBuilding.config
   const devices = useMemo(
@@ -99,6 +110,25 @@ function App() {
     const timer = setInterval(() => setTelemetryTick((t) => t + 1), 5000)
     return () => clearInterval(timer)
   }, [])
+
+  // TTN / ChirpStack live link. A new uplink bumps the telemetry tick so the
+  // 3D scene and 2D plan re-read sensorReading and repaint with the real value.
+  const integracao = useIntegracao(() => setTelemetryTick((t) => t + 1))
+
+  // keep the device -> DevEUI bindings the live store uses in sync with the plan
+  useEffect(() => {
+    atualizarBindings(project.devices)
+  }, [project.devices])
+
+  // light / dark UI theme — applied to <html> so the CSS token sets switch
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', tema)
+    try {
+      localStorage.setItem('maqo.tema', tema)
+    } catch {
+      // storage unavailable — the choice just does not persist
+    }
+  }, [tema])
 
   const rooms = useMemo(
     () => (typeof activeFloor === 'number' ? resolveRooms(project, activeBuilding, activeFloor) : []),
@@ -128,9 +158,12 @@ function App() {
   }, [devices, rooms, activeFloor])
 
   useEffect(() => {
+    // don't persist while the picker is open — otherwise the placeholder project
+    // behind the overlay would overwrite whatever is saved before a choice is made
+    if (onboarding) return
     const timer = setTimeout(() => saveProject(project), 400)
     return () => clearTimeout(timer)
-  }, [project])
+  }, [project, onboarding])
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -395,19 +428,32 @@ function App() {
         setActiveBuildingId(imported.buildings[0].id)
         setSelectedDeviceId(null)
         setActiveFloor('all')
+        setOnboarding(false)
+        setProjetoConfirmado(true)
       })
       .catch(() => window.alert('Nao foi possivel importar este ficheiro. Verifica se e um projeto Maqo valido (.json).'))
   }
 
+  /** "Novo projeto" now opens the template picker instead of assuming a building. */
   function handleNewProject() {
-    if (!window.confirm('Comecar um novo projeto? Perdes as alteracoes nao exportadas do projeto atual.')) return
-    const fresh = createDefaultProject()
+    setOnboarding(true)
+  }
+
+  /** Seeds a fresh project for the chosen scenario and adopts its defaults. */
+  function escolherCenario(cenario: Cenario) {
+    const fresh = criarProjetoDeCenario(cenario)
+    const meta = cenarioMeta[cenario]
     setProject(fresh)
     setActiveBuildingId(fresh.buildings[0].id)
     setSelectedDeviceId(null)
-    setActiveFloor('all')
+    setSelectedRoomId(null)
+    setActiveFloor(meta.aberturaFloor)
     setPlacementType(null)
+    setPropagationPreset(meta.propagacao)
+    setTimeOfDay(meta.hora)
     setFicheiroAtual(null)
+    setOnboarding(false)
+    setProjetoConfirmado(true)
   }
 
   /** Menu commands coming from the Electron shell. */
@@ -426,6 +472,8 @@ function App() {
           setFicheiroAtual(caminho)
           setSelectedDeviceId(null)
           setActiveFloor('all')
+          setOnboarding(false)
+          setProjetoConfirmado(true)
         } catch {
           window.alert('Este ficheiro nao e um projeto Maqo valido.')
         }
@@ -445,6 +493,13 @@ function App() {
 
   return (
     <div className="app-shell">
+      {onboarding && (
+        <Onboarding
+          onEscolher={escolherCenario}
+          onImportar={handleImport}
+          onCancelar={projetoConfirmado ? () => setOnboarding(false) : undefined}
+        />
+      )}
       {relatorioAberto && (
         <Relatorio
           project={project}
@@ -462,6 +517,8 @@ function App() {
         onRename={(name) => updateBuilding({ name })}
         timeOfDay={timeOfDay}
         onTimeOfDay={setTimeOfDay}
+        tema={tema}
+        onToggleTema={() => setTema((t) => (t === 'dark' ? 'light' : 'dark'))}
         onExport={() => handleExport(false)}
         onImport={handleImport}
         onNewProject={handleNewProject}
@@ -479,6 +536,7 @@ function App() {
       <div className="workspace">
         <Sidebar
           building={building}
+          estruturaLabel={vocab.estrutura}
           onUpdateBuilding={updateBuilding}
           site={activeBuilding.site}
           onUpdateSite={(site) => updateBuildingSite(activeBuilding.id, site)}
@@ -511,17 +569,29 @@ function App() {
               />
             ) : null
           }
+          integracao={
+            <IntegracaoPanel
+              suportado={integracao.suportado}
+              config={integracao.config}
+              onConfig={integracao.definirConfig}
+              estado={integracao.estado}
+              onLigar={integracao.ligar}
+              onDesligar={integracao.desligar}
+            />
+          }
         />
 
-        <DraggablePanel
-          title="Dispositivos"
-          icon={<GatewayIcon size={15} />}
-          defaultPosition={devicesPanelPosition}
-          width={320}
-          storageKey="maqo.panel.devices"
-        >
+        <aside className="devices-rail">
+          <div className="devices-rail-header">
+            <span className="devices-rail-title">
+              <GatewayIcon size={15} />
+              Dispositivos
+            </span>
+          </div>
+          <div className="devices-rail-body floating-panel-body">
           <DevicesPanel
             building={building}
+            scenario={scenario}
             devices={devices}
             activeFloor={activeFloor}
             onChangeFloor={setActiveFloor}
@@ -548,7 +618,8 @@ function App() {
             mapaCalorVisivel={mapaCalorVisivel}
             onToggleMapaCalor={() => setMapaCalorVisivel((v) => !v)}
           />
-        </DraggablePanel>
+          </div>
+        </aside>
 
         <main className="viewport-area">
           <BuildingTabs
@@ -562,13 +633,21 @@ function App() {
             onAdd={addBuilding}
             onDelete={deleteBuilding}
           />
-          <FloorTabs building={building} devices={devices} activeFloor={activeFloor} onChange={setActiveFloor} />
+          <FloorTabs
+            building={building}
+            scenario={scenario}
+            terrenoLabel={vocab.terreno}
+            devices={devices}
+            activeFloor={activeFloor}
+            onChange={setActiveFloor}
+          />
 
           <div className={activeFloor === 'all' ? 'viewport-split full' : 'viewport-split'}>
             <div className="canvas-wrap">
               <Suspense fallback={<VistaACarregar />}>
                 <Scene3D
                 buildings={project.buildings}
+                scenario={scenario}
                 activeBuildingId={activeBuilding.id}
                 seed={project.seed}
                 devices={project.devices}

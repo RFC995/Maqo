@@ -1,4 +1,5 @@
 import { measurementUnits, type Measurement } from './catalog'
+import { modoDados, valorPorDispositivo } from './liveStore'
 
 /**
  * Simulated live readings.
@@ -70,6 +71,13 @@ function round(value: number, decimals: number) {
  * sensors drift apart the way real ones do, seeded from the device id.
  */
 export function sensorReading(measurement: Measurement, sensorId: string, tick: number): number | null {
+  // a device bound to a real DevEUI on a live TTN/ChirpStack link reads its
+  // actual uplinks — null here means "bound but not reported yet", i.e. wait
+  // for the next real uplink rather than fabricate a value
+  if (modoDados(sensorId) === 'real') {
+    return valorPorDispositivo(sensorId, measurement)
+  }
+
   const spec = specs[measurement]
   if (!spec) return null
 

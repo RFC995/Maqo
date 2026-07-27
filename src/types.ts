@@ -1,5 +1,14 @@
 export type BuildingStyle = 'office' | 'industrial' | 'residential'
 
+/**
+ * The kind of situation a project plans for. Chosen once at startup and stored
+ * on the project; it drives which 3D world renders, the starting deployment,
+ * the propagation defaults and the vocabulary the UI speaks. `edificios` is the
+ * original single/multi-building mode; everything else is a template on top of
+ * the same footprint-based engine.
+ */
+export type Cenario = 'edificios' | 'parking' | 'agricultura' | 'cidade' | 'livre'
+
 export interface BuildingConfig {
   name: string
   style: BuildingStyle
@@ -37,6 +46,12 @@ export interface DeviceItem {
   z: number
   radius: number
   notes: string
+  /**
+   * DevEUI of the real LoRaWAN device this marker stands for, e.g.
+   * "24e124...". When set and the TTN/ChirpStack link is live, the dashboard
+   * shows this device's real uplinks instead of the simulated telemetry.
+   */
+  devEui?: string
 }
 
 export type RoomKind =
@@ -84,6 +99,8 @@ export interface Room {
 export interface Project {
   version: 2
   id: string
+  /** which template/situation this project plans for; defaults to 'edificios' on migration */
+  scenario: Cenario
   buildings: Building[]
   devices: DeviceItem[]
   /**

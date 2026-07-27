@@ -1,20 +1,43 @@
 import type { ReactNode } from 'react'
-import type { BuildingConfig, DeviceItem, FloorSelector } from '../types'
+import type { BuildingConfig, Cenario, DeviceItem, FloorSelector } from '../types'
+import { cenarioMeta } from '../cenarios'
 import { LayersIcon, RoofIcon, GroundIcon } from './icons'
 
 interface FloorTabsProps {
   building: BuildingConfig
+  scenario: Cenario
+  /** word for the ground/exterior tab in this scenario, e.g. "Parque" */
+  terrenoLabel: string
   devices: DeviceItem[]
   activeFloor: FloorSelector
   onChange: (floor: FloorSelector) => void
 }
 
-export function FloorTabs({ building, devices, activeFloor, onChange }: FloorTabsProps) {
+export function FloorTabs({ building, scenario, terrenoLabel, devices, activeFloor, onChange }: FloorTabsProps) {
   function countFor(key: FloorSelector) {
     if (key === 'all') return devices.length
     if (key === 'roof') return devices.filter((d) => d.mount === 'roof').length
     if (key === 'ground') return devices.filter((d) => d.mount === 'ground').length
     return devices.filter((d) => d.mount === 'interior' && d.floor === key).length
+  }
+
+  // a flat scenario (car park, farm) has no floors or roof — just an overview
+  // and the single ground surface where everything is placed
+  if (!cenarioMeta[scenario].pisos) {
+    return (
+      <div className="floor-tabs">
+        <TabButton active={activeFloor === 'all'} onClick={() => onChange('all')}>
+          <LayersIcon size={14} />
+          Vista geral
+        </TabButton>
+        <div className="floor-tabs-divider" />
+        <TabButton active={activeFloor === 'ground'} onClick={() => onChange('ground')}>
+          <GroundIcon size={14} />
+          {terrenoLabel}
+          {countFor('ground') > 0 && <span className="tab-badge">{countFor('ground')}</span>}
+        </TabButton>
+      </div>
+    )
   }
 
   const floorKeys: FloorSelector[] = Array.from({ length: building.floors }, (_, i) => i)
