@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import type { Building, Project } from '../types'
 import { batteryLabel, measurementLabels, powerLabels } from '../catalog'
+import { MaqoMark } from './Logo'
 import { EU868, linkQualityColors, linkQualityLabels, sfColors, type Propagation } from '../rf'
 import { propagationPresets } from '../rf'
 import {
@@ -138,7 +139,13 @@ export function Relatorio({
               </p>
             </div>
             <div className="folha-marca">
-              <span className="folha-marca-nome">Maqo</span>
+              <div className="folha-marca-lockup">
+                <MaqoMark size={30} />
+                <div className="folha-marca-texto">
+                  <span className="folha-marca-nome">Maqo</span>
+                  <span className="folha-marca-sub">LoRaWAN Planner</span>
+                </div>
+              </div>
               <span className="folha-data">{dataPortuguesa()}</span>
             </div>
           </header>

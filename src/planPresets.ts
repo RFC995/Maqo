@@ -1,6 +1,7 @@
-import type { BuildingConfig, DeviceItem, DeviceType } from './types'
+import type { BuildingConfig, Cenario, DeviceItem, DeviceType } from './types'
 import { catalogById, type DeviceModel } from './catalog'
 import { generateRooms, type Room, type RoomKind } from './rooms'
+import { gerarParque } from './parkingGenerator'
 
 export interface PlanPreset {
   id: string
@@ -8,6 +9,8 @@ export interface PlanPreset {
   description: string
   /** the models the preset deploys, for the card's bill of materials */
   models: string[]
+  /** which scenarios this preset belongs to; omitted = the building scenarios */
+  scenarios?: Cenario[]
   /** buildingId is stamped on by the caller, which knows which building is active */
   generate: (building: BuildingConfig, seed: number) => Omit<DeviceItem, 'buildingId'>[]
 }
@@ -300,6 +303,83 @@ export const planPresets: PlanPreset[] = [
     },
   },
   {
+    id: 'parking-ocupacao',
+    name: 'Ocupacao de lugares',
+    description:
+      'Gateway exterior UG67 em mastro e um sensor de distancia EM400-TLD por lugar, para saber em tempo real que lugares estao livres ou ocupados.',
+    models: ['UG67', 'EM400-TLD'],
+    scenarios: ['parking'],
+    generate(b, seed) {
+      const layout = gerarParque(b, seed)
+      const drafts: Draft[] = [
+        {
+          model: model('ms-ug67'),
+          mount: 'ground',
+          floor: null,
+          x: -b.width / 2 + 3,
+          z: b.depth / 2 - 3,
+          place: 'Mastro de entrada',
+          notes: 'IP67 em poste, cobre todo o parque a superficie.',
+        },
+      ]
+      // one sensor per bay, capped so a very large lot stays manageable
+      const passo = Math.max(1, Math.ceil(layout.bays.length / 40))
+      let n = 1
+      for (let i = 0; i < layout.bays.length; i += passo) {
+        const bay = layout.bays[i]
+        drafts.push({
+          model: model('ms-em400-tld'),
+          mount: 'ground',
+          floor: null,
+          x: bay.x,
+          z: bay.z,
+          place: `Lugar ${n}`,
+          notes: 'ToF laser sobre o lugar; distancia curta = ocupado.',
+        })
+        n += 1
+      }
+      return materialize(drafts)
+    },
+  },
+  {
+    id: 'agri-campo',
+    name: 'Monitorizacao de campo',
+    description:
+      'Gateway solar SG50 autonomo, estacao meteorologica WTS506 e uma grelha de sondas EM500 pelo terreno — sem alimentacao de rede.',
+    models: ['SG50', 'WTS506', 'EM500-CO2', 'EM500-PT100'],
+    scenarios: ['agricultura'],
+    generate(b) {
+      const drafts: Draft[] = [
+        {
+          model: model('ms-sg50'),
+          mount: 'ground',
+          floor: null,
+          x: b.width / 2 - 4,
+          z: b.depth / 2 - 3,
+          place: 'Gateway solar',
+          notes: 'Painel solar + reserva: dias sem sol sem perder a rede.',
+        },
+        { model: model('ms-wts506'), mount: 'ground', floor: null, x: 0, z: -b.depth / 2 + 4, place: 'Estacao meteo' },
+        { model: model('ms-em500-co2'), mount: 'ground', floor: null, x: b.width / 2 - 11, z: b.depth / 2 - 5, place: 'CO2 estufa' },
+      ]
+      // soil probes across the two field beds
+      const grelha: [number, number][] = []
+      for (const gx of [-b.width * 0.28, -b.width * 0.1, b.width * 0.1, b.width * 0.28])
+        for (const gz of [-b.depth * 0.28, 0]) grelha.push([gx, gz])
+      grelha.forEach(([x, z], i) => {
+        drafts.push({
+          model: model('ms-em500-pt100'),
+          mount: 'ground',
+          floor: null,
+          x,
+          z,
+          place: `Sonda de campo ${i + 1}`,
+        })
+      })
+      return materialize(drafts)
+    },
+  },
+  {
     id: 'cobertura-maxima',
     name: 'Cobertura redundante',
     description:
@@ -353,3 +433,14 @@ export const planPresets: PlanPreset[] = [
     },
   },
 ]
+
+/**
+ * Plans relevant to a scenario. Parking and agriculture have their own; every
+ * other scenario is building-based and gets the untagged (interior) plans.
+ */
+export function presetsForScenario(cenario: Cenario): PlanPreset[] {
+  if (cenario === 'parking' || cenario === 'agricultura') {
+    return planPresets.filter((p) => p.scenarios?.includes(cenario))
+  }
+  return planPresets.filter((p) => !p.scenarios)
+}

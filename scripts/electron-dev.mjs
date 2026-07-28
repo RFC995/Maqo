@@ -6,6 +6,11 @@
  */
 import { spawn } from 'node:child_process'
 import { connect } from 'node:net'
+import { sincronizarChavePublica } from './chaves.mjs'
+
+// keep the app's public key in step with the local private key before every run,
+// so dev never boots verifying licences against a stale/mismatched key
+sincronizarChavePublica()
 
 const ehWindows = process.platform === 'win32'
 const npx = ehWindows ? 'npx.cmd' : 'npx'
@@ -24,18 +29,31 @@ vite.stdout.on('data', (chunk) => {
 })
 
 function esperarPorta(porta, tentativas = 90) {
+  // probe both stacks: on Windows, Vite bound to "localhost" often listens on
+  // IPv6 ::1 only, so an IPv4-only probe waits forever and gives up
+  const hosts = ['127.0.0.1', '::1']
   return new Promise((resolve, reject) => {
     const tentar = (restantes) => {
-      const socket = connect(porta, '127.0.0.1')
-      socket.once('connect', () => {
-        socket.destroy()
-        resolve()
-      })
-      socket.once('error', () => {
-        socket.destroy()
-        if (restantes <= 0) reject(new Error(`Vite nao arrancou na porta ${porta}`))
-        else setTimeout(() => tentar(restantes - 1), 250)
-      })
+      let pendentes = hosts.length
+      let ligou = false
+      for (const host of hosts) {
+        const socket = connect(porta, host)
+        socket.once('connect', () => {
+          socket.destroy()
+          if (!ligou) {
+            ligou = true
+            resolve()
+          }
+        })
+        socket.once('error', () => {
+          socket.destroy()
+          pendentes -= 1
+          if (pendentes === 0 && !ligou) {
+            if (restantes <= 0) reject(new Error(`Vite nao arrancou na porta ${porta}`))
+            else setTimeout(() => tentar(restantes - 1), 250)
+          }
+        })
+      }
     }
     tentar(tentativas)
   })

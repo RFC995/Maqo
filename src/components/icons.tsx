@@ -200,3 +200,51 @@ export function ReportIcon({ size, className, style }: IconProps) {
   )
 }
 
+export function ParkingIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <rect x="4" y="4" width="16" height="16" rx="3" />
+      <path d="M9.5 16V8h3.2a2.4 2.4 0 0 1 0 4.8H9.5" />
+    </svg>
+  )
+}
+
+export function LeafIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <path d="M4 20c0-8 6-14 16-14 0 10-6 14-14 14a5 5 0 0 1-2 0Z" />
+      <path d="M5 19c4-5 8-7 12-8" />
+    </svg>
+  )
+}
+
+export function CityIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <path d="M3 21h18" />
+      <path d="M5 21V9l5-3v15" />
+      <path d="M10 21V11l6-3v13" />
+      <path d="M16 21V13l3-1.5V21" />
+      <path d="M7.5 12h.01M7.5 15h.01M12.5 14h.01M12.5 17h.01" strokeWidth={2.2} />
+    </svg>
+  )
+}
+
+export function CloudIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <path d="M7 18a4 4 0 0 1-.5-7.97A5.5 5.5 0 0 1 17 9.5a3.5 3.5 0 0 1 .5 6.98" />
+      <path d="M9 21l1.5-2.5M12 21l1.5-2.5M15 21l1.5-2.5" />
+    </svg>
+  )
+}
+
+export function SparklesIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <path d="M12 4l1.6 4.4L18 10l-4.4 1.6L12 16l-1.6-4.4L6 10l4.4-1.6Z" />
+      <path d="M18 4.5v3M19.5 6h-3M5 16v2.5M6.25 17.25h-2.5" />
+    </svg>
+  )
+}
+

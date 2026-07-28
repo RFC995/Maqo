@@ -4,6 +4,10 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* larger base for readability — the app is used by older staff, so every
+     rem-based size scales up from here. Tuned with the legibility layer in
+     App.css. */
+  font-size: 17.5px;
 }
 
 * {
