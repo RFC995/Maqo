@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react'
+import type { CatalogCategory } from '../catalog'
 
 type IconProps = { size?: number; className?: string; style?: CSSProperties }
 
@@ -198,5 +199,168 @@ export function ReportIcon({ size, className, style }: IconProps) {
       <path d="M9 13h6M9 17h4" />
     </svg>
   )
+}
+
+export function ParkingIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <rect x="4" y="4" width="16" height="16" rx="3" />
+      <path d="M9.5 16V8h3.2a2.4 2.4 0 0 1 0 4.8H9.5" />
+    </svg>
+  )
+}
+
+export function LeafIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <path d="M4 20c0-8 6-14 16-14 0 10-6 14-14 14a5 5 0 0 1-2 0Z" />
+      <path d="M5 19c4-5 8-7 12-8" />
+    </svg>
+  )
+}
+
+export function CityIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <path d="M3 21h18" />
+      <path d="M5 21V9l5-3v15" />
+      <path d="M10 21V11l6-3v13" />
+      <path d="M16 21V13l3-1.5V21" />
+      <path d="M7.5 12h.01M7.5 15h.01M12.5 14h.01M12.5 17h.01" strokeWidth={2.2} />
+    </svg>
+  )
+}
+
+export function CloudIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <path d="M7 18a4 4 0 0 1-.5-7.97A5.5 5.5 0 0 1 17 9.5a3.5 3.5 0 0 1 .5 6.98" />
+      <path d="M9 21l1.5-2.5M12 21l1.5-2.5M15 21l1.5-2.5" />
+    </svg>
+  )
+}
+
+/** Water-leak alert marker. Color (not shape) conveys wet vs. dry — pass it via `style.color`. */
+export function LeakIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <path d="M12 3c-3.4 4.4-6.4 8.5-6.4 11.8a6.4 6.4 0 0 0 12.8 0C18.4 11.5 15.4 7.4 12 3Z" />
+      <path d="M12 10.3v3.2" strokeWidth={2.2} />
+      <circle cx="12" cy="16.2" r="0.15" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+/** Tank / fill-level marker. `level` (0-100) sets how full the inner fill sits. */
+export function TankIcon({ size, className, style, level = 0 }: IconProps & { level?: number }) {
+  const pct = Math.max(0, Math.min(100, level)) / 100
+  const fillH = 14 * pct
+  const fillY = 19 - fillH
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <rect x="5" y="4" width="14" height="15" rx="2" />
+      <path d="M8 4V2.5h8V4" />
+      {pct > 0 && <rect x="6.4" y={fillY} width="11.2" height={fillH} rx="1" fill="currentColor" stroke="none" opacity={0.8} />}
+      {pct > 0 && <path d={`M6.4 ${fillY}h11.2`} strokeWidth={1.4} />}
+    </svg>
+  )
+}
+
+/** Air-quality marker (IAQ panels: CO2/TVOC/PM/HCHO/O3). */
+export function IaqIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <path d="M3 8h11a3 3 0 1 0-2.4-4.8" />
+      <path d="M3 12.5h15a3 3 0 1 1-2.4 4.8" />
+      <path d="M3 17h8a2.4 2.4 0 1 1-2 3.8" />
+    </svg>
+  )
+}
+
+/** Ambient temperature/humidity marker. */
+export function ThermometerIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <path d="M12 3a2.4 2.4 0 0 0-2.4 2.4v9.3a4 4 0 1 0 4.8 0V5.4A2.4 2.4 0 0 0 12 3Z" />
+      <circle cx="12" cy="17" r="1.6" fill="currentColor" stroke="none" />
+      <path d="M12 8v6" strokeWidth={1.6} />
+    </svg>
+  )
+}
+
+/** Occupancy / presence / door-contact marker. */
+export function PresenceIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <circle cx="12" cy="7" r="3" />
+      <path d="M5.5 20.5c0-4 3-6.5 6.5-6.5s6.5 2.5 6.5 6.5" />
+    </svg>
+  )
+}
+
+/** People-counting marker. */
+export function CountIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <circle cx="9" cy="7" r="2.6" />
+      <path d="M3.8 20c0-3.2 2.3-5.4 5.2-5.4s5.2 2.2 5.2 5.4" />
+      <circle cx="17" cy="7.5" r="2.1" />
+      <path d="M15.8 14.9c2.4 0.3 4.2 2.3 4.2 5.1" />
+    </svg>
+  )
+}
+
+/** Energy / power marker. */
+export function EnergyIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <path d="M13 2 4.5 13.5h5.8L11 22l8.5-11.5h-5.8Z" />
+    </svg>
+  )
+}
+
+/** Control / relay / I-O marker. */
+export function ControlIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <rect x="3" y="8" width="18" height="8" rx="4" />
+      <circle cx="15.5" cy="12" r="2.6" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+export function SparklesIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <path d="M12 4l1.6 4.4L18 10l-4.4 1.6L12 16l-1.6-4.4L6 10l4.4-1.6Z" />
+      <path d="M18 4.5v3M19.5 6h-3M5 16v2.5M6.25 17.25h-2.5" />
+    </svg>
+  )
+}
+
+/** Alert / warning marker, used by the dashboard's KPI summary. */
+export function AlertIcon({ size, className, style }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} style={style}>
+      <path d="M12 3.5 22 20H2Z" />
+      <path d="M12 10v4.4" strokeWidth={2.2} />
+      <circle cx="12" cy="17.2" r="0.15" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+/** One representative marker icon per catalog category, for the dashboard's sensor markers. */
+export const categoryIcons: Record<CatalogCategory, typeof GatewayIcon> = {
+  gateway: GatewayIcon,
+  iaq: IaqIcon,
+  ambiente: ThermometerIcon,
+  ocupacao: PresenceIcon,
+  contagem: CountIcon,
+  agua: LeakIcon,
+  nivel: TankIcon,
+  energia: EnergyIcon,
+  controlo: ControlIcon,
+  exterior: CloudIcon,
+  generico: SensorIcon,
 }
 

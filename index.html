@@ -5,6 +5,13 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Maqo &mdash; Planeamento LoRaWAN</title>
+    <script>
+      // apply the saved theme before first paint to avoid a light/dark flash
+      try {
+        var t = localStorage.getItem('maqo.tema')
+        if (t) document.documentElement.setAttribute('data-theme', t)
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

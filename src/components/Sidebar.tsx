@@ -1,11 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { buildingStyleLabels, type BuildingConfig, type BuildingStyle } from '../types'
-import { BuildingIcon, LayersIcon, SignalIcon } from './icons'
+import { BuildingIcon, CloudIcon, LayersIcon, SignalIcon } from './icons'
 
-type TabId = 'edificio' | 'rede' | 'salas'
+type TabId = 'edificio' | 'rede' | 'salas' | 'integracao'
 
 interface SidebarProps {
   building: BuildingConfig
+  /** scenario word for the structure, e.g. "Edifício", "Parque" */
+  estruturaLabel: string
   onUpdateBuilding: (patch: Partial<BuildingConfig>) => void
   /** this building's centre on the shared site, in world coordinates */
   site: { x: number; z: number }
@@ -15,6 +17,8 @@ interface SidebarProps {
   network: ReactNode
   /** room editor, absent unless a real floor is selected */
   rooms: ReactNode
+  /** TTN / ChirpStack live-data connection section */
+  integracao: ReactNode
 }
 
 /**
@@ -22,7 +26,17 @@ interface SidebarProps {
  * are far taller than the viewport, and stacking them buried the building
  * controls under a scroll.
  */
-export function Sidebar({ building, onUpdateBuilding, site, onUpdateSite, onRegenerateVariant, network, rooms }: SidebarProps) {
+export function Sidebar({
+  building,
+  estruturaLabel,
+  onUpdateBuilding,
+  site,
+  onUpdateSite,
+  onRegenerateVariant,
+  network,
+  rooms,
+  integracao,
+}: SidebarProps) {
   const [tab, setTab] = useState<TabId>('edificio')
 
   // the rooms tab only exists while a floor is selected
@@ -33,7 +47,7 @@ export function Sidebar({ building, onUpdateBuilding, site, onUpdateSite, onRege
   return (
     <aside className="sidebar">
       <nav className="sidebar-tabs" role="tablist">
-        <SidebarTab id="edificio" active={tab} onSelect={setTab} icon={<BuildingIcon size={14} />} label="Edificio" />
+        <SidebarTab id="edificio" active={tab} onSelect={setTab} icon={<BuildingIcon size={14} />} label={estruturaLabel} />
         <SidebarTab id="rede" active={tab} onSelect={setTab} icon={<SignalIcon size={14} />} label="Rede" />
         <SidebarTab
           id="salas"
@@ -44,6 +58,7 @@ export function Sidebar({ building, onUpdateBuilding, site, onUpdateSite, onRege
           disabled={!rooms}
           title={rooms ? undefined : 'Seleciona um piso para editar as salas'}
         />
+        <SidebarTab id="integracao" active={tab} onSelect={setTab} icon={<CloudIcon size={14} />} label="Ligar" />
       </nav>
 
       <div className="sidebar-scroll">
@@ -146,6 +161,7 @@ export function Sidebar({ building, onUpdateBuilding, site, onUpdateSite, onRege
 
         {tab === 'rede' && network}
         {tab === 'salas' && rooms}
+        {tab === 'integracao' && integracao}
       </div>
     </aside>
   )

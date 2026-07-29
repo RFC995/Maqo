@@ -1,8 +1,18 @@
-import { Billboard, Html } from '@react-three/drei'
+import { Billboard, Html, Line } from '@react-three/drei'
 import type { ThreeEvent } from '@react-three/fiber'
 import { resolveModel } from '../catalog'
 import { deviceWorldYFor } from '../geometry'
-import { coverageRings, dataRate, defaultPropagation, type Propagation } from '../rf'
+import {
+  analyseLink,
+  coverageRings,
+  dataRate,
+  defaultPropagation,
+  linkQualityColors,
+  linkQualityLabels,
+  type Propagation,
+} from '../rf'
+import { formatReading, primaryReading, readingStatus, readingStatusColors } from '../telemetry'
+import { categoryIcons } from './icons'
 import { deviceColors, type BuildingConfig, type DeviceItem, type DeviceType } from '../types'
 
 export const deviceWorldY = deviceWorldYFor
@@ -16,6 +26,10 @@ interface DeviceMarkersProps {
   coverageOpacity: number
   labelsVisible: boolean
   propagation?: Propagation
+  /** dashboard (read-only) mode: gateways stay visible across floors, sensor
+   * labels always show their live reading and link quality, no click needed */
+  dashboardMode?: boolean
+  telemetryTick?: number
   onSelect: (id: string) => void
 }
 
@@ -28,18 +42,22 @@ export function DeviceMarkers({
   coverageOpacity,
   labelsVisible,
   propagation = defaultPropagation,
+  dashboardMode = false,
+  telemetryTick = 0,
   onSelect,
 }: DeviceMarkersProps) {
+  const gateways = devices.filter((d) => d.type === 'gateway')
+
   return (
     <group>
       {devices.map((device) => {
-        const dimmed =
-          visibleFloor !== 'all' &&
-          !(
-            (visibleFloor === 'roof' && device.mount === 'roof') ||
-            (visibleFloor === 'ground' && device.mount === 'ground') ||
-            (typeof visibleFloor === 'number' && device.mount === 'interior' && device.floor === visibleFloor)
-          )
+        const onActiveFloor =
+          (visibleFloor === 'roof' && device.mount === 'roof') ||
+          (visibleFloor === 'ground' && device.mount === 'ground') ||
+          (typeof visibleFloor === 'number' && device.mount === 'interior' && device.floor === visibleFloor)
+        // a gateway's coverage matters to every floor, so the dashboard keeps
+        // it visible even while inspecting a floor it is not physically on
+        const dimmed = visibleFloor !== 'all' && !onActiveFloor && !(dashboardMode && device.type === 'gateway')
 
         return (
           <DeviceMarker
@@ -50,8 +68,11 @@ export function DeviceMarkers({
             dimmed={dimmed}
             coverageVisible={coverageVisible}
             coverageOpacity={coverageOpacity}
-            labelVisible={labelsVisible && !dimmed}
+            labelVisible={dashboardMode ? !dimmed : labelsVisible && !dimmed}
             propagation={propagation}
+            dashboardMode={dashboardMode}
+            telemetryTick={telemetryTick}
+            gateways={gateways}
             onSelect={onSelect}
           />
         )
@@ -75,6 +96,9 @@ function DeviceMarker({
   coverageOpacity,
   labelVisible,
   propagation,
+  dashboardMode = false,
+  telemetryTick = 0,
+  gateways = [],
   onSelect,
 }: {
   device: DeviceItem
@@ -85,13 +109,23 @@ function DeviceMarker({
   coverageOpacity: number
   labelVisible: boolean
   propagation: Propagation
+  dashboardMode?: boolean
+  telemetryTick?: number
+  gateways?: DeviceItem[]
   onSelect: (id: string) => void
 }) {
   const y = deviceWorldY(device, building)
-  const color = deviceColors[device.type]
+  const model = resolveModel(device.modelId)
+  const category = model?.category
+  const reading = dashboardMode && model ? primaryReading(model, device.id, telemetryTick) : null
+  const readingColor = reading ? readingStatusColors[readingStatus(reading.measurement, reading.value)] : null
+  const link = dashboardMode && device.type === 'sensor' ? analyseLink(device, gateways, building, propagation) : null
+  const linkGateway = link?.gatewayId ? gateways.find((g) => g.id === link.gatewayId) : undefined
+  const color = readingColor ?? deviceColors[device.type]
   const baseOpacity = dimmed ? 0.16 : 1
   const poleBottom =
     device.mount === 'interior' ? (device.floor ?? 0) * building.floorHeight : device.mount === 'ground' ? 0 : null
+  const CategoryIcon = dashboardMode && device.type === 'sensor' && category ? categoryIcons[category] : null
 
   function handlePointerDown(event: ThreeEvent<PointerEvent>) {
     event.stopPropagation()
@@ -136,26 +170,73 @@ function DeviceMarker({
         </Billboard>
       )}
 
+      {!dimmed && dashboardMode && link && linkGateway && (
+        <Line
+          points={[
+            [0, 0.1, 0],
+            [linkGateway.x - device.x, deviceWorldY(linkGateway, building) - y, linkGateway.z - device.z],
+          ]}
+          color={linkQualityColors[link.quality]}
+          transparent
+          opacity={0.55}
+          lineWidth={1.4}
+          dashed
+          dashSize={0.35}
+          gapSize={0.25}
+        />
+      )}
+
       {labelVisible && (
         /*
          * Compact by default — a dense floor plan puts dozens of these on
          * screen at once and full names turned the building into a wall of
          * overlapping chips. The selected device gets the full detail.
+         *
+         * Dashboard mode never needs a click: every sensor shows its live
+         * reading, category icon and (for sensors) the gateway serving it,
+         * right on the always-visible label.
          */
         <Html center distanceFactor={38} position={[0, 1.05, 0]} zIndexRange={[15, 0]} style={{ pointerEvents: 'none' }}>
-          <div className={selected ? 'device-label selected' : 'device-label compact'} style={{ borderColor: color }}>
-            <span className="device-label-dot" style={{ background: color }} />
-            {selected ? (
+          {dashboardMode ? (
+            <div className="device-label dashboard" style={{ borderColor: color }}>
+              {CategoryIcon ? (
+                <span className="device-label-icon" style={{ color }}>
+                  <CategoryIcon size={14} />
+                </span>
+              ) : (
+                <span className="device-label-dot" style={{ background: color }} />
+              )}
               <span className="device-label-text">
                 <span className="device-label-name">{device.name}</span>
-                <span className="device-label-meta">
-                  {resolveModel(device.modelId)?.name ?? `${locationLabel(device)} · R ${device.radius} m`}
-                </span>
+                {reading ? (
+                  <span className="device-label-value" style={{ color }}>
+                    {formatReading(reading.measurement, reading.value)}
+                  </span>
+                ) : (
+                  <span className="device-label-meta">{model?.name ?? locationLabel(device)}</span>
+                )}
+                {link && link.gatewayId && (
+                  <span className="device-label-link" style={{ color: linkQualityColors[link.quality] }}>
+                    {link.gatewayName} · {linkQualityLabels[link.quality]}
+                  </span>
+                )}
               </span>
-            ) : (
-              <span className="device-label-code">{resolveModel(device.modelId)?.model ?? device.name}</span>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className={selected ? 'device-label selected' : 'device-label compact'} style={{ borderColor: color }}>
+              <span className="device-label-dot" style={{ background: color }} />
+              {selected ? (
+                <span className="device-label-text">
+                  <span className="device-label-name">{device.name}</span>
+                  <span className="device-label-meta">
+                    {model?.name ?? `${locationLabel(device)} · R ${device.radius} m`}
+                  </span>
+                </span>
+              ) : (
+                <span className="device-label-code">{model?.model ?? device.name}</span>
+              )}
+            </div>
+          )}
         </Html>
       )}
 

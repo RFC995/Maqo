@@ -5,13 +5,18 @@ import {
   deviceLabels,
   mountLabels,
   type BuildingConfig,
+  type Cenario,
   type DeviceItem,
   type DeviceType,
   type FloorSelector,
   type MountType,
 } from '../types'
-import { planPresets, type PlanPreset } from '../planPresets'
-import { resolveModel } from '../catalog'
+import { presetsForScenario, type PlanPreset } from '../planPresets'
+import { measurementLabels, resolveModel, type Measurement } from '../catalog'
+import { entradaDe, estadoIntegracao, listaDevEuis } from '../liveStore'
+import { haQuanto, normalizarDevEui } from '../integracao'
+import { formatReading } from '../telemetry'
+import { useLiveVersion } from '../useLive'
 import {
   analyseLink,
   defaultPropagation,
@@ -56,6 +61,7 @@ const deviceIcons: Record<DeviceType, typeof GatewayIcon> = {
 
 interface DevicesPanelProps {
   building: BuildingConfig
+  scenario: Cenario
   devices: DeviceItem[]
   activeFloor: FloorSelector
   onChangeFloor: (floor: FloorSelector) => void
@@ -87,6 +93,7 @@ interface DevicesPanelProps {
 
 export function DevicesPanel({
   building,
+  scenario,
   devices,
   activeFloor,
   onChangeFloor,
@@ -117,6 +124,7 @@ export function DevicesPanel({
 }: DevicesPanelProps) {
   const selectedDevice = devices.find((d) => d.id === selectedDeviceId) ?? null
   const [tab, setTab] = useState<PanelTab>('colocar')
+  const presets = useMemo(() => presetsForScenario(scenario), [scenario])
 
   // the picture is persuasive, but a proposal needs the number
   const coberturaDoPiso = useMemo(() => {
@@ -199,7 +207,7 @@ export function DevicesPanel({
           geradas.
         </p>
         <div className="plan-list">
-          {planPresets.map((preset) => (
+          {presets.map((preset) => (
             <div key={preset.id} className="plan-card">
               <div className="plan-card-info">
                 <span className="plan-card-name">{preset.name}</span>
@@ -447,6 +455,8 @@ function DeviceInspector({
 
       <ModelSpecSheet modelId={device.modelId} />
 
+      {device.type !== 'gateway' && <LigacaoReal device={device} onUpdate={onUpdate} />}
+
       <LinkBudget
         device={device}
         building={building}
@@ -571,6 +581,95 @@ function DeviceInspector({
           placeholder="Ex: cobre armazem norte, instalar a 3m de altura..."
         />
       </label>
+    </div>
+  )
+}
+
+/**
+ * Binds a device marker to a real LoRaWAN sensor by its DevEUI and shows the
+ * last uplink received for it. Once bound and the link is live, the whole
+ * dashboard reads this sensor's real data instead of the simulation.
+ */
+function LigacaoReal({
+  device,
+  onUpdate,
+}: {
+  device: DeviceItem
+  onUpdate: (patch: Partial<DeviceItem>) => void
+}) {
+  useLiveVersion() // refresh as uplinks land
+  const estado = estadoIntegracao()
+  const ligado = estado.estado === 'ligado'
+  const eui = device.devEui ?? ''
+  const euiNorm = normalizarDevEui(eui)
+  const entrada = euiNorm ? entradaDe(euiNorm) : undefined
+  const detetados = listaDevEuis()
+  const medidas = entrada ? (Object.keys(entrada.valores) as Measurement[]) : []
+
+  return (
+    <div className="ligacao-real">
+      <div className="lb-head">
+        <SignalIcon size={13} /> Sensor real (LoRaWAN)
+      </div>
+      <label>
+        DevEUI
+        <input
+          type="text"
+          list="deveuis-detetados"
+          value={eui}
+          placeholder="ex.: 24E124..."
+          onChange={(event) => onUpdate({ devEui: event.target.value.trim() || undefined })}
+          spellCheck={false}
+          autoComplete="off"
+        />
+      </label>
+      <datalist id="deveuis-detetados">
+        {detetados.map((d) => (
+          <option key={d.devEui} value={d.devEui}>
+            {d.deviceId ?? d.devEui}
+          </option>
+        ))}
+      </datalist>
+
+      {!euiNorm ? (
+        <p className="panel-hint">
+          Associa o DevEUI do sensor real para o dashboard mostrar os dados vindos da TTN / ChirpStack em vez dos
+          valores simulados.
+        </p>
+      ) : entrada ? (
+        <div className={`leitura-real ${ligado ? 'ao-vivo' : 'inativa'}`}>
+          <div className="leitura-topo">
+            <span className="leitura-etiqueta">{ligado ? 'Ao vivo' : 'Ultima leitura'}</span>
+            <span className="leitura-tempo">{haQuanto(entrada.at)}</span>
+          </div>
+          <div className="leitura-valores">
+            {medidas.map((m) => (
+              <span key={m} className="leitura-chip">
+                <span className="leitura-chip-nome">{measurementLabels[m]}</span>
+                <strong>{formatReading(m, entrada.valores[m] ?? null)}</strong>
+              </span>
+            ))}
+            {medidas.length === 0 && <span className="leitura-chip vazio">sem campos descodificados</span>}
+          </div>
+          {(entrada.rssi !== undefined || entrada.sf !== undefined) && (
+            <div className="leitura-radio">
+              {entrada.rssi !== undefined && <span>RSSI {Math.round(entrada.rssi)} dBm</span>}
+              {entrada.snr !== undefined && <span>SNR {entrada.snr.toFixed(1)} dB</span>}
+              {entrada.sf !== undefined && <span>SF{entrada.sf}</span>}
+              {entrada.fcnt !== undefined && <span>#{entrada.fcnt}</span>}
+            </div>
+          )}
+          {!ligado && (
+            <p className="panel-hint">Ligacao inativa — a mostrar simulacao. Liga na aba "Ligar" para dados reais.</p>
+          )}
+        </div>
+      ) : (
+        <p className="panel-hint warn">
+          {ligado
+            ? 'Ligado, mas ainda sem uplinks deste DevEUI. Os sensores LoRaWAN reportam de tempos a tempos — aguarda.'
+            : 'DevEUI associado. Liga-te ao servidor na aba "Ligar" para receber os dados deste sensor.'}
+        </p>
+      )}
     </div>
   )
 }

@@ -19,17 +19,19 @@ contextBridge.exposeInMainWorld('maqo', {
   // report
   guardarRelatorioPdf: (nomeSugerido) => ipcRenderer.invoke('relatorio:pdf', nomeSugerido),
 
-  // LNS (ChirpStack)
-  lnsGuardarLigacao: (dados) => ipcRenderer.invoke('lns:guardar-ligacao', dados),
-  lnsObterLigacao: () => ipcRenderer.invoke('lns:obter-ligacao'),
-  lnsRemoverLigacao: () => ipcRenderer.invoke('lns:remover-ligacao'),
-  lnsTestarLigacao: (dados) => ipcRenderer.invoke('lns:testar-ligacao', dados),
-  lnsListarDispositivos: () => ipcRenderer.invoke('lns:listar-dispositivos'),
-  lnsDefinirSubscricoes: (devEuis) => ipcRenderer.invoke('lns:definir-subscricoes', devEuis),
-  aoReceberLeituraLns: (callback) => {
-    const handler = (_evento, leituras) => callback(leituras)
-    ipcRenderer.on('lns:leitura', handler)
-    return () => ipcRenderer.off('lns:leitura', handler)
+  // TTN / ChirpStack integration
+  integracaoLigar: (config) => ipcRenderer.invoke('integracao:ligar', config),
+  integracaoDesligar: () => ipcRenderer.invoke('integracao:desligar'),
+  integracaoEstado: () => ipcRenderer.invoke('integracao:estado'),
+  aoUplinkIntegracao: (callback) => {
+    const handler = (_evento, payload) => callback(payload)
+    ipcRenderer.on('integracao:uplink', handler)
+    return () => ipcRenderer.off('integracao:uplink', handler)
+  },
+  aoEstadoIntegracao: (callback) => {
+    const handler = (_evento, payload) => callback(payload)
+    ipcRenderer.on('integracao:estado', handler)
+    return () => ipcRenderer.off('integracao:estado', handler)
   },
 
   // menu events -> renderer

@@ -3,8 +3,10 @@ import { computePlotSize } from '../buildingGenerator'
 import { roomClimateFromSensors, statusColors, type LiveReadings, type Room, type SensorSource } from '../rooms'
 import { coverageRings, defaultPropagation, type Propagation } from '../rf'
 import { resolveModel } from '../catalog'
+import { formatReading, primaryReading, readingStatus, readingStatusColors } from '../telemetry'
 import { calcularMapaCalor, mapaCalorParaDataUrl } from '../heatmap'
 import { deviceColors, type BuildingConfig, type DeviceItem, type FloorSelector } from '../types'
+import { TankIcon, categoryIcons } from './icons'
 
 interface FloorPlan2DProps {
   building: BuildingConfig
@@ -20,11 +22,13 @@ interface FloorPlan2DProps {
   mapaCalorVisivel?: boolean
   propagation?: Propagation
   selectedRoomId?: string | null
+  /** read-only (dashboard) mode: no drag, no placement, markers show live readings instead of the model code */
+  readOnly?: boolean
   onSelectRoom?: (id: string | null) => void
   onMoveRoom?: (id: string, x: number, z: number) => void
-  onPlace: (x: number, z: number) => void
+  onPlace?: (x: number, z: number) => void
   onSelect: (id: string | null) => void
-  onMove: (id: string, x: number, z: number) => void
+  onMove?: (id: string, x: number, z: number) => void
 }
 
 function floorLabel(activeFloor: Exclude<FloorSelector, 'all'>) {
@@ -47,6 +51,7 @@ export function FloorPlan2D({
   mapaCalorVisivel = false,
   propagation = defaultPropagation,
   selectedRoomId = null,
+  readOnly = false,
   onSelectRoom,
   onMoveRoom,
   onPlace,
@@ -89,24 +94,26 @@ export function FloorPlan2D({
 
   function handleBackgroundClick(evt: ReactPointerEvent<SVGSVGElement>) {
     if (dragId || dragRoomId) return
-    if (!placementMode) {
+    if (!placementMode || readOnly) {
       onSelect(null)
       onSelectRoom?.(null)
       return
     }
     const { x, z } = clientToLocal(evt)
-    onPlace(x, z)
+    onPlace?.(x, z)
   }
 
   function handleMarkerDown(evt: ReactPointerEvent<SVGGElement>, id: string) {
     evt.stopPropagation()
-    ;(evt.target as Element).setPointerCapture?.(evt.pointerId)
-    setDragId(id)
+    if (!readOnly) {
+      ;(evt.target as Element).setPointerCapture?.(evt.pointerId)
+      setDragId(id)
+    }
     onSelect(id)
   }
 
   function handleRoomDown(evt: ReactPointerEvent<SVGGElement>, id: string) {
-    if (placementMode || !onSelectRoom) return
+    if (placementMode || readOnly || !onSelectRoom) return
     evt.stopPropagation()
     const room = rooms.find((r) => r.id === id)
     if (!room) return
@@ -122,7 +129,7 @@ export function FloorPlan2D({
   function handlePointerMove(evt: ReactPointerEvent<SVGSVGElement>) {
     if (dragId) {
       const { x, z } = clientToLocal(evt)
-      onMove(dragId, x, z)
+      onMove?.(dragId, x, z)
       return
     }
     if (dragRoomId && onMoveRoom) {
@@ -212,7 +219,7 @@ export function FloorPlan2D({
                 <g
                   key={room.id}
                   className="floorplan-room"
-                  style={{ pointerEvents: placementMode ? 'none' : undefined, cursor: 'move' }}
+                  style={{ pointerEvents: placementMode || readOnly ? 'none' : undefined, cursor: 'move' }}
                   onPointerDown={(evt) => handleRoomDown(evt, room.id)}
                 >
                   <rect
@@ -281,13 +288,31 @@ export function FloorPlan2D({
           const color = deviceColors[device.type]
           const selected = device.id === selectedId
           const isRf = device.type === 'gateway' || device.type === 'repeater'
+          const model = resolveModel(device.modelId)
+          const category = model?.category
+          const isLevel = category === 'nivel'
+          const isCategoryIcon = device.type === 'sensor' && category !== undefined
+          const reading = model ? primaryReading(model, device.id, telemetryTick) : null
+          const readingColor = reading ? readingStatusColors[readingStatus(reading.measurement, reading.value)] : color
+          const CategoryIcon = category ? categoryIcons[category] : undefined
+          const iconSize = 1.5
+          const iconHalf = iconSize / 2
+          // the room already carries its own label, so a marker only needs its
+          // model code (or, read-only, its live reading) until it is inspected
+          const label =
+            readOnly && reading
+              ? formatReading(reading.measurement, reading.value)
+              : selected
+                ? device.name
+                : (model?.model ?? device.name)
           return (
             <g
               key={device.id}
               transform={`translate(${device.x}, ${device.z})`}
               onPointerDown={(evt) => handleMarkerDown(evt, device.id)}
-              className="floorplan-marker"
+              className={readOnly ? 'floorplan-marker readonly' : 'floorplan-marker'}
             >
+              {readOnly && <title>{device.name}</title>}
               {coverageVisible &&
                 (device.type === 'gateway' ? (
                   <>
@@ -314,8 +339,23 @@ export function FloorPlan2D({
                   />
                 ))}
               {selected && <circle r={0.75} fill="none" stroke={color} strokeWidth={0.16} />}
-              <circle r={0.42} fill={color} stroke="#111827" strokeWidth={0.08} />
-              <circle r={0.12} fill="#111827" />
+              {isCategoryIcon && CategoryIcon ? (
+                <>
+                  <circle r={0.62} fill="#f6f3ea" stroke="#111827" strokeWidth={0.08} />
+                  <g transform={`translate(${-iconHalf}, ${-iconHalf})`}>
+                    {isLevel ? (
+                      <TankIcon size={iconSize} level={reading?.value ?? 0} style={{ color: readingColor }} />
+                    ) : (
+                      <CategoryIcon size={iconSize} style={{ color: readingColor }} />
+                    )}
+                  </g>
+                </>
+              ) : (
+                <>
+                  <circle r={0.42} fill={color} stroke="#111827" strokeWidth={0.08} />
+                  <circle r={0.12} fill="#111827" />
+                </>
+              )}
               <text
                 y={1.35}
                 textAnchor="middle"
@@ -326,9 +366,7 @@ export function FloorPlan2D({
                 paintOrder="stroke"
                 style={{ pointerEvents: 'none', fontWeight: 600 }}
               >
-                {/* the room already carries its own label, so a marker only
-                    needs its model code until it is the one being inspected */}
-                {selected ? device.name : (resolveModel(device.modelId)?.model ?? device.name)}
+                {label}
               </text>
             </g>
           )

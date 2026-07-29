@@ -6,6 +6,7 @@ export function createDefaultProject(): Project {
   return {
     version: 2,
     id: crypto.randomUUID(),
+    scenario: 'edificios',
     buildings: [
       {
         id: crypto.randomUUID(),
@@ -42,12 +43,15 @@ export function isValidProjectFile(raw: unknown): boolean {
  */
 export function migrateProject(raw: unknown): Project {
   const r = raw as any
-  if (r.version === 2) return r as Project
+  // v2 projects created before scenarios existed have no `scenario` field —
+  // they were all buildings, so default them to 'edificios'.
+  if (r.version === 2) return { ...(r as Project), scenario: r.scenario ?? 'edificios' }
 
   const buildingId = crypto.randomUUID()
   return {
     version: 2,
     id: r.id,
+    scenario: 'edificios',
     buildings: [{ id: buildingId, config: r.building, site: { x: 0, z: 0 } }],
     devices: (r.devices ?? []).map((d: any) => ({ ...d, buildingId })),
     rooms: r.rooms

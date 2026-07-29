@@ -1,26 +1,29 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
-import { OrbitControls, Sky, Stars, ContactShadows, Environment, SoftShadows } from '@react-three/drei'
+import { OrbitControls, Sky, Stars, ContactShadows, Environment, Lightformer, SoftShadows } from '@react-three/drei'
 import {
   EffectComposer,
   Bloom,
   N8AO,
   ToneMapping,
   Vignette,
+  TiltShift2,
   BrightnessContrast,
   HueSaturation,
-  ChromaticAberration,
-  Noise,
 } from '@react-three/postprocessing'
-import { ToneMappingMode, BlendFunction } from 'postprocessing'
+import { ToneMappingMode } from 'postprocessing'
 import * as THREE from 'three'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
-import type { Building, BuildingConfig, DeviceItem, FloorSelector } from '../types'
+import type { Building, BuildingConfig, Cenario, DeviceItem, FloorSelector } from '../types'
 import { buildingTopY, computePlotSize } from '../buildingGenerator'
 import { campusBounds } from '../buildings'
-import type { LiveReadings, Room, SensorSource } from '../rooms'
+import type { Room, SensorSource } from '../rooms'
 import { BuildingModel } from './Building'
 import { Site } from './Site'
+import { CityContext } from './CityContext'
+import { cityHalfExtent } from '../cityGenerator'
+import { ParkingLot } from './ParkingLot'
+import { Farm } from './Farm'
 import { DeviceMarkers } from './DeviceMarkers'
 import { defaultPropagation as defaultPropagationRf, type Propagation } from '../rf'
 import { InteriorFloor } from './Interior'
@@ -30,11 +33,9 @@ import { calcularMapaCalor, desenharMapaCalor } from '../heatmap'
 
 export type TimeOfDay = 'day' | 'dusk' | 'night'
 
-// module-level so the effect doesn't get a new Vector2 identity (and rebuild its shader) every render
-const chromaticOffset = new THREE.Vector2(0.0006, 0.0006)
-
 interface Scene3DProps {
   buildings: Building[]
+  scenario: Cenario
   activeBuildingId: string
   seed: number
   devices: DeviceItem[]
@@ -52,7 +53,8 @@ interface Scene3DProps {
   rooms: Room[]
   telemetryTick: number
   sensorsByRoom: Map<string, SensorSource[]>
-  liveReadings?: LiveReadings
+  /** read-only dashboard rendering: gateways stay visible across floors, sensor labels always show live data */
+  dashboardMode?: boolean
   onSelectDevice: (id: string | null) => void
   onPlaceInterior: (floor: number, x: number, z: number) => void
   onPlaceRoof: (x: number, z: number) => void
@@ -83,24 +85,6 @@ const lightPresets: Record<
     bloomIntensity: number
     bloomThreshold: number
     aoIntensity: number
-    // Scales scene.environmentIntensity (three r162+), i.e. how strongly the
-    // HDRI light-probe feeds the PBR materials' IBL term. The HDRIs were shot
-    // under their own (fixed) sun/streetlight color, which fights the
-    // hand-tuned directional/hemisphere light colors above if let through at
-    // full strength — most visibly as a warm sodium-lamp cast bleeding across
-    // the whole night lawn from `night.hdr`'s street lighting. Keeping it low
-    // lets the HDRI still do its job (real reflections in glass and the
-    // plaza's MeshReflectorMaterial) without recoloring matte surfaces.
-    environmentIntensity: number
-    // Renderer camera exposure, applied in `<PosProcessamento>`'s AGX pass
-    // (postprocessing's ToneMappingEffect pulls in three's own tonemapping
-    // GLSL chunk, which reads `toneMappingExposure` off the renderer
-    // regardless of `renderer.toneMapping` — so this genuinely reaches AGX
-    // even though the Canvas's own `flat` prop disables tone-mapping on the
-    // main pass). Physically-based sky/HDRI output easily exceeds what AGX
-    // treats as "reference white" (~2.9 linear); left near 1 it clips a big
-    // share of the dusk sky and Sky/Venice-Sunset HDRI to flat near-white.
-    exposure: number
     grade: { saturation: number; brightness: number; contrast: number }
   }
 > = {
@@ -126,12 +110,10 @@ const lightPresets: Record<
     bloomIntensity: 0.28,
     bloomThreshold: 0.86,
     aoIntensity: 2,
-    environmentIntensity: 0.55,
-    exposure: 1.05,
     grade: { saturation: 0.12, brightness: 0.01, contrast: 0.08 },
   },
   dusk: {
-    sun: [-55, 26, -30],
+    sun: [-55, 18, -30],
     sunColor: '#ffb877',
     sunIntensity: 1.1,
     ambient: 0.32,
@@ -145,23 +127,13 @@ const lightPresets: Record<
     litBoost: 0.85,
     showSky: true,
     showStars: false,
-    // Turbidity/mie were originally tuned 2-6x past day's values chasing a
-    // dramatic sunset glow, which pushed the sky's HDR output well past AGX's
-    // clipping point (confirmed by forcing exposure to 0.05: the dome held
-    // real gradient/color instead of flat white, and *everything* else in
-    // the frame went dark with it, proving the sky itself was the outlier,
-    // not general scene brightness). Kept close to day's magnitude instead —
-    // the warm sun color, low sun angle and post-process grade below carry
-    // the "dusk" mood without needing a hotter physical sky model.
-    skyTurbidity: 3,
-    skyRayleigh: 1.2,
-    skyMieCoefficient: 0.0015,
-    skyMieDirectionalG: 0.7,
-    bloomIntensity: 0.4,
-    bloomThreshold: 0.8,
+    skyTurbidity: 6,
+    skyRayleigh: 2.4,
+    skyMieCoefficient: 0.018,
+    skyMieDirectionalG: 0.93,
+    bloomIntensity: 0.55,
+    bloomThreshold: 0.6,
     aoIntensity: 2.2,
-    environmentIntensity: 0.5,
-    exposure: 0.85,
     grade: { saturation: 0.18, brightness: 0.0, contrast: 0.1 },
   },
   night: {
@@ -186,25 +158,8 @@ const lightPresets: Record<
     bloomIntensity: 1.15,
     bloomThreshold: 0.22,
     aoIntensity: 2.6,
-    environmentIntensity: 0.22,
-    exposure: 0.95,
     grade: { saturation: 0.14, brightness: 0.01, contrast: 0.12 },
   },
-}
-
-/**
- * `renderer.toneMappingExposure` reaches the postprocessing AGX pass (it
- * pulls in three's shared tonemapping GLSL chunk, which reads the uniform
- * off the renderer no matter what `renderer.toneMapping` mode is set to —
- * see the `exposure` field above), but the Canvas's own `onCreated` only
- * fires once at mount. This keeps it synced to the active time-of-day preset.
- */
-function ExposureControl({ exposure }: { exposure: number }) {
-  const gl = useThree((state) => state.gl)
-  useEffect(() => {
-    gl.toneMappingExposure = exposure
-  }, [gl, exposure])
-  return null
 }
 
 type CameraFraming = { position: [number, number, number]; target: [number, number, number] }
@@ -350,6 +305,7 @@ function translateFraming(framing: CameraFraming, site: { x: number; z: number }
 
 export function Scene3D({
   buildings,
+  scenario,
   activeBuildingId,
   seed,
   devices,
@@ -367,7 +323,7 @@ export function Scene3D({
   rooms,
   telemetryTick,
   sensorsByRoom,
-  liveReadings,
+  dashboardMode = false,
   onSelectDevice,
   onPlaceInterior,
   onPlaceRoof,
@@ -389,10 +345,15 @@ export function Scene3D({
   // (`max(width,depth) * 1.6 + 30`, generous enough to cover the surrounding
   // Site grounds too), plus how far that building's own site offset sits
   // from the origin.
+  // building scenarios get a surrounding procedural city (with real wall
+  // textures); parking/farm keep their own dedicated worlds
+  const buildingScenario = scenario !== 'parking' && scenario !== 'agricultura'
   const shadowSpan = Math.max(
     ...buildings.map(
       (b) => Math.max(Math.abs(b.site.x), Math.abs(b.site.z)) + Math.max(b.config.width, b.config.depth) * 1.6 + 30,
     ),
+    // stretch the shadow frustum over the city so its blocks cast/receive shadows
+    buildingScenario ? cityHalfExtent(activeBuilding.config) : 0,
   )
   const contactShadowsScale = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) + 40
 
@@ -403,9 +364,11 @@ export function Scene3D({
       dpr={perfil.dpr}
       // preserveDrawingBuffer keeps the frame readable for the report snapshot
       gl={{ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true }}
+      onCreated={({ gl }) => {
+        gl.toneMappingExposure = 1.05
+      }}
       onPointerMissed={() => onSelectDevice(null)}
     >
-      <ExposureControl exposure={preset.exposure} />
       <color attach="background" args={[preset.background]} />
       <fog attach="fog" args={[preset.fog, preset.fogNear, preset.fogFar]} />
 
@@ -451,40 +414,49 @@ export function Scene3D({
       )}
       {preset.showStars && perfil.estrelas && <Stars radius={200} depth={60} count={2600} factor={3.4} fade speed={0.4} />}
 
-      {/* Suspense must live inside the Canvas: R3F's reconciler is separate from
-          the DOM tree, so the <Suspense> around <Scene3D> in App.tsx never sees
-          this component suspend while its .hdr file loads. */}
-      <Suspense fallback={null}>
-        <SceneEnvironment timeOfDay={timeOfDay} intensity={preset.environmentIntensity} />
-      </Suspense>
+      <SceneEnvironment timeOfDay={timeOfDay} preset={preset} sun={preset.sun} />
 
+      <Suspense fallback={null}>
       {buildings.map((b) => {
         const isActive = b.id === activeBuildingId
         const buildingDevices = devices.filter((d) => d.buildingId === b.id)
         return (
           <group key={b.id} position={[b.site.x, 0, b.site.z]}>
-            <Site
-              building={b.config}
-              seed={seed}
-              timeOfDay={timeOfDay}
-              minGroundHalf={isActive ? maxCoverageRadius * 1.15 : 0}
-            />
-            <BuildingModel
-              building={b.config}
-              seed={seed}
-              activeFloor={isActive ? activeFloor : 'all'}
-              litBoost={preset.litBoost}
-            />
-            {isActive && typeof activeFloor === 'number' && (
-              <InteriorFloor
+            {scenario === 'parking' ? (
+              <ParkingLot
                 building={b.config}
-                floorIndex={activeFloor}
-                rooms={rooms}
+                seed={seed}
+                timeOfDay={timeOfDay}
+                devices={buildingDevices}
                 telemetryTick={telemetryTick}
-                labelsVisible={labelsVisible}
-                sensorsByRoom={sensorsByRoom}
-                liveReadings={liveReadings}
               />
+            ) : scenario === 'agricultura' ? (
+              <Farm building={b.config} seed={seed} timeOfDay={timeOfDay} />
+            ) : (
+              <>
+                <Site
+                  building={b.config}
+                  seed={seed}
+                  timeOfDay={timeOfDay}
+                  minGroundHalf={isActive ? maxCoverageRadius * 1.15 : 0}
+                />
+                <BuildingModel
+                  building={b.config}
+                  seed={seed}
+                  activeFloor={isActive ? activeFloor : 'all'}
+                  litBoost={preset.litBoost}
+                />
+                {isActive && typeof activeFloor === 'number' && (
+                  <InteriorFloor
+                    building={b.config}
+                    floorIndex={activeFloor}
+                    rooms={rooms}
+                    telemetryTick={telemetryTick}
+                    labelsVisible={labelsVisible}
+                    sensorsByRoom={sensorsByRoom}
+                  />
+                )}
+              </>
             )}
             <DeviceMarkers
               devices={buildingDevices}
@@ -503,6 +475,8 @@ export function Scene3D({
               propagation={propagation}
               coverageOpacity={coverageOpacity}
               labelsVisible={labelsVisible}
+              dashboardMode={dashboardMode}
+              telemetryTick={telemetryTick}
               onSelect={onSelectDevice}
             />
             {isActive && (
@@ -527,6 +501,15 @@ export function Scene3D({
           </group>
         )
       })}
+      </Suspense>
+
+      {buildingScenario && (
+        <Suspense fallback={null}>
+          <group position={[activeBuilding.site.x, 0, activeBuilding.site.z]}>
+            <CityContext building={activeBuilding.config} seed={seed} timeOfDay={timeOfDay} />
+          </group>
+        </Suspense>
+      )}
 
       <ContactShadows
         position={[bounds.centerX, 0.02, bounds.centerZ]}
@@ -538,7 +521,7 @@ export function Scene3D({
 
       <CameraRig buildings={buildings} activeBuildingId={activeBuildingId} activeFloor={activeFloor} resetSignal={resetSignal} />
 
-      <PosProcessamento preset={preset} perfil={perfil} />
+      <PosProcessamento preset={preset} perfil={perfil} overview={activeFloor === 'all'} />
       <RegistoDeCaptura />
     </Canvas>
   )
@@ -609,9 +592,12 @@ function RegistoDeCaptura() {
 function PosProcessamento({
   preset,
   perfil,
+  overview,
 }: {
   preset: (typeof lightPresets)['day']
   perfil: PerfilQualidade
+  /** true in "vista geral" — the miniature tilt-shift is strongest here */
+  overview: boolean
 }) {
   const gl = useThree((estado) => estado.gl)
   const [ativo, setAtivo] = useState(false)
@@ -670,43 +656,74 @@ function PosProcessamento({
         intensity={preset.bloomIntensity}
         radius={0.72}
       />
+      {/* tilt-shift: a sharp horizontal band with the ground/sky blurred away
+          reads the whole scene as a physical scale model (maquette). Stronger in
+          the overview, gentle when zoomed into a single floor. */}
+      <TiltShift2
+        blur={overview ? 0.16 : 0.06}
+        taper={0.42}
+        start={[0, 0.42]}
+        end={[1, 0.42]}
+        samples={10}
+      />
       <ToneMapping mode={ToneMappingMode.AGX} />
       <HueSaturation saturation={preset.grade.saturation} hue={0} />
       <BrightnessContrast brightness={preset.grade.brightness} contrast={preset.grade.contrast} />
       <Vignette eskil={false} offset={0.2} darkness={0.62} />
-      {/* Two very light finishing touches — a real lens shows a trace of fringing
-          toward the edges and never a perfectly clean sensor. Kept subtle enough
-          to read as "photographed" rather than as a filter. */}
-      <ChromaticAberration
-        offset={chromaticOffset}
-        radialModulation
-        modulationOffset={0.4}
-      />
-      <Noise premultiply blendFunction={BlendFunction.OVERLAY} opacity={0.05} />
     </EffectComposer>
   )
 }
 
-/**
- * One real, CC0-licensed street/sky HDRI per time of day (Poly Haven: Wide Street 01,
- * Venice Sunset, Cobblestone Street Night — `public/hdri/CREDITS.txt` has the source
- * links), used as a physically based light probe for reflections and ambient fill.
- * `background={false}` keeps it out of the visible backdrop: the procedural
- * `Sky`/`Stars` still draw what the camera sees, so the hand-tuned sun position stays
- * the one thing actually casting the (matching) directional-light shadows.
- */
-// Root-relative paths break under Electron's file:// production build (see the
-// `base: './'` note in vite.config.ts) — BASE_URL keeps this resolving the same
-// way DeviceArtwork.tsx already does for public/devices/.
-const environmentFiles: Record<TimeOfDay, string> = {
-  day: `${import.meta.env.BASE_URL}hdri/day.hdr`,
-  dusk: `${import.meta.env.BASE_URL}hdri/dusk.hdr`,
-  night: `${import.meta.env.BASE_URL}hdri/night.hdr`,
-}
-
-function SceneEnvironment({ timeOfDay, intensity }: { timeOfDay: TimeOfDay; intensity: number }) {
+function SceneEnvironment({
+  timeOfDay,
+  preset,
+  sun,
+}: {
+  timeOfDay: TimeOfDay
+  preset: (typeof lightPresets)['day']
+  sun: [number, number, number]
+}) {
+  const night = timeOfDay === 'night'
   return (
-    <Environment key={timeOfDay} files={environmentFiles[timeOfDay]} background={false} environmentIntensity={intensity} />
+    <Environment key={timeOfDay} resolution={256} frames={1} background={false}>
+      {/* sky dome */}
+      <Lightformer
+        form="ring"
+        intensity={night ? 0.15 : 1.7}
+        color={preset.hemiSky}
+        position={[0, 16, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        scale={[42, 42, 1]}
+      />
+      {/* ground bounce */}
+      <Lightformer
+        intensity={night ? 0.05 : 0.6}
+        color={preset.hemiGround}
+        position={[0, -10, 0]}
+        rotation={[Math.PI / 2, 0, 0]}
+        scale={[42, 42, 1]}
+      />
+      {/* warm sun disc (key reflection) */}
+      <Lightformer
+        form="circle"
+        intensity={timeOfDay === 'day' ? 4 : timeOfDay === 'dusk' ? 3 : 0.25}
+        color={preset.sunColor}
+        position={sun}
+        scale={[8, 8, 1]}
+      />
+      {/* soft key panel above-front */}
+      <Lightformer
+        intensity={night ? 0.2 : 2}
+        color="#ffffff"
+        position={[10, 18, 22]}
+        rotation={[-Math.PI / 3, 0, 0]}
+        scale={[20, 12, 1]}
+      />
+      {/* cool rim lights left/right for glass sparkle */}
+      <Lightformer intensity={night ? 0.4 : 0.9} color="#cfe4ff" position={[-22, 8, 12]} scale={[3, 14, 1]} />
+      <Lightformer intensity={night ? 0.4 : 0.9} color="#cfe4ff" position={[22, 8, -12]} scale={[3, 14, 1]} />
+      <Lightformer intensity={night ? 0.3 : 0.7} color="#ffffff" position={[-14, 5, -20]} scale={[10, 6, 1]} />
+    </Environment>
   )
 }
 

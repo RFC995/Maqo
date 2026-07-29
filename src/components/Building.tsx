@@ -1,8 +1,9 @@
 import { useMemo } from 'react'
 import { Instance, Instances } from '@react-three/drei'
+import { useLoader } from '@react-three/fiber'
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import type { BuildingConfig, FloorSelector } from '../types'
+import type { BuildingConfig, BuildingStyle, FloorSelector } from '../types'
 import {
   buildingTopY,
   computeWindowDims,
@@ -12,6 +13,16 @@ import {
   styleConfigs,
 } from '../buildingGenerator'
 import { getRoofMaps, getWallMaps } from '../textures'
+import plasterUrl from '../assets/textures/painted_plaster_wall.jpg'
+import concrete008Url from '../assets/textures/concrete_wall_008.jpg'
+import brickUrl from '../assets/textures/red_brick_03.jpg'
+
+// real CC0 wall photos (Polyhaven) per building style
+const wallTexByStyle: Record<BuildingStyle, string> = {
+  office: plasterUrl,
+  industrial: concrete008Url,
+  residential: brickUrl,
+}
 
 interface BuildingModelProps {
   building: BuildingConfig
@@ -74,15 +85,26 @@ export function BuildingModel({ building, seed, activeFloor, litBoost }: Buildin
   const halfW = building.width / 2
   const halfD = building.depth / 2
 
-  const wallMaps = useMemo(
-    () => getWallMaps(Math.max(1, building.width / 3.2), Math.max(1, building.floorHeight / 1.6)),
-    [building.width, building.floorHeight],
-  )
+  const wallReal = useLoader(THREE.TextureLoader, wallTexByStyle[building.style])
+  const wallMaps = useMemo(() => {
+    const rx = Math.max(1, building.width / 3.6)
+    const ry = Math.max(1, building.floorHeight / 2.6)
+    const map = wallReal.clone()
+    map.needsUpdate = true
+    map.wrapS = map.wrapT = THREE.RepeatWrapping
+    map.colorSpace = THREE.SRGBColorSpace
+    map.repeat.set(rx, ry)
+    const normal = getWallMaps(rx, ry).normal
+    return { map, normal }
+  }, [wallReal, building.width, building.floorHeight])
 
-  const roofMaps = useMemo(
-    () => getRoofMaps(Math.max(1, building.width / 5), Math.max(1, building.depth / 5)),
-    [building.width, building.depth],
-  )
+  // flat roofs are commonly ballasted with gravel — the "roof" photo set is
+  // the closest real-material match to the old procedural gravel texture
+  const roofMaps = useMemo(() => {
+    const rx = Math.max(1, building.width / 5)
+    const ry = Math.max(1, building.depth / 5)
+    return getRoofMaps(rx, ry)
+  }, [building.width, building.depth])
 
   return (
     <group>
@@ -94,7 +116,9 @@ export function BuildingModel({ building, seed, activeFloor, litBoost }: Buildin
       {geometry.floors.map((floor) => {
         const dimmed = interiorFocus && floor.index > (activeFloor as number)
         const opacity = dimmed ? 0.08 : 1
-        const wallColor = floor.index % 2 === 0 ? style.wallColor : style.wallColorAlt
+        // near-white so the real wall photo shows at its true colour, with a
+        // hair of floor-to-floor banding rather than the old flat style colour
+        const wallColor = floor.index % 2 === 0 ? '#efede7' : '#e6e4dd'
 
         const isOpenFloor = interiorFocus && floor.index === (activeFloor as number)
         const wallT = 0.3
@@ -120,7 +144,6 @@ export function BuildingModel({ building, seed, activeFloor, litBoost }: Buildin
                       map={wallMaps.map}
                       normalMap={wallMaps.normal}
                       normalScale={wallNormalScale}
-                      roughnessMap={wallMaps.roughnessMap}
                       color={wallColor}
                       roughness={wallRoughness}
                       metalness={0.05}
@@ -260,7 +283,6 @@ export function BuildingModel({ building, seed, activeFloor, litBoost }: Buildin
             map={roofMaps.map}
             normalMap={roofMaps.normal}
             normalScale={roofNormalScale}
-            roughnessMap={roofMaps.roughnessMap}
             color="#c8ccd4"
             roughness={0.98}
           />

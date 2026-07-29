@@ -1,19 +1,34 @@
 import { useRef } from 'react'
 import type { TimeOfDay } from './Scene3D'
-import { DownloadIcon, UploadIcon, SunIcon, DuskIcon, MoonIcon, TargetIcon, PlusIcon, ReportIcon, SignalIcon } from './icons'
+import type { AppView } from '../types'
+import { MaqoLogo } from './Logo'
+import {
+  DownloadIcon,
+  UploadIcon,
+  SunIcon,
+  DuskIcon,
+  MoonIcon,
+  TargetIcon,
+  PlusIcon,
+  ReportIcon,
+  BuildingIcon,
+  SignalIcon,
+} from './icons'
 
 interface TopBarProps {
   projectName: string
   onRename: (name: string) => void
+  view: AppView
+  onViewChange: (view: AppView) => void
   timeOfDay: TimeOfDay
   onTimeOfDay: (value: TimeOfDay) => void
+  tema: 'light' | 'dark'
+  onToggleTema: () => void
   onExport: () => void
   onImport: (file: File) => void
   onNewProject: () => void
   onResetView: () => void
   onRelatorio: () => void
-  /** absent in the browser build — the LNS bridge only exists inside Electron */
-  onLns?: () => void
   savedLabel: string
 }
 
@@ -26,14 +41,17 @@ const timeOptions: { key: TimeOfDay; label: string; icon: typeof SunIcon }[] = [
 export function TopBar({
   projectName,
   onRename,
+  view,
+  onViewChange,
   timeOfDay,
   onTimeOfDay,
+  tema,
+  onToggleTema,
   onExport,
   onImport,
   onNewProject,
   onResetView,
   onRelatorio,
-  onLns,
   savedLabel,
 }: TopBarProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -41,7 +59,8 @@ export function TopBar({
   return (
     <header className="topbar">
       <div className="topbar-brand">
-        <span className="brand-mark">Maqo</span>
+        <MaqoLogo size={30} subtitle="LoRaWAN Planner" />
+        <span className="topbar-sep" aria-hidden="true" />
         <input
           className="project-name-input"
           value={projectName}
@@ -52,23 +71,45 @@ export function TopBar({
       </div>
 
       <div className="topbar-center">
-        <div className="time-toggle">
-          {timeOptions.map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              type="button"
-              className={timeOfDay === key ? 'time-btn active' : 'time-btn'}
-              onClick={() => onTimeOfDay(key)}
-              title={label}
-            >
-              <Icon size={15} />
-              <span>{label}</span>
-            </button>
-          ))}
-        </div>
+        <button
+          type="button"
+          className="icon-btn view-toggle"
+          onClick={() => onViewChange(view === 'planeamento' ? 'dashboard' : 'planeamento')}
+          title={view === 'planeamento' ? 'Ver dashboard' : 'Voltar ao planeamento'}
+        >
+          {view === 'planeamento' ? <SignalIcon size={16} /> : <BuildingIcon size={16} />}
+          <span>{view === 'planeamento' ? 'Dashboard' : 'Planeamento'}</span>
+        </button>
+
+        {view === 'planeamento' && (
+          <div className="time-toggle">
+            {timeOptions.map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                type="button"
+                className={timeOfDay === key ? 'time-btn active' : 'time-btn'}
+                onClick={() => onTimeOfDay(key)}
+                title={label}
+              >
+                <Icon size={15} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="topbar-actions">
+        <button
+          type="button"
+          className="icon-btn theme-toggle"
+          onClick={onToggleTema}
+          title={tema === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
+          aria-label={tema === 'dark' ? 'Mudar para tema claro' : 'Mudar para tema escuro'}
+        >
+          {tema === 'dark' ? <SunIcon size={16} /> : <MoonIcon size={16} />}
+          <span>{tema === 'dark' ? 'Claro' : 'Escuro'}</span>
+        </button>
         <button type="button" className="icon-btn" onClick={onResetView} title="Repor vista">
           <TargetIcon size={16} />
           <span>Vista</span>
@@ -77,12 +118,6 @@ export function TopBar({
           <ReportIcon size={16} />
           <span>Relatorio</span>
         </button>
-        {onLns && (
-          <button type="button" className="icon-btn" onClick={onLns} title="Ligar a um Network Server (ChirpStack)">
-            <SignalIcon size={16} />
-            <span>LNS</span>
-          </button>
-        )}
 
         <button type="button" className="icon-btn" onClick={onExport} title="Exportar projeto (.json)">
           <DownloadIcon size={16} />

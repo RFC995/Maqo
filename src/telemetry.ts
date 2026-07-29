@@ -1,4 +1,5 @@
-import { measurementUnits, type Measurement } from './catalog'
+import { measurementUnits, type DeviceModel, type Measurement } from './catalog'
+import { modoDados, valorPorDispositivo } from './liveStore'
 
 /**
  * Simulated live readings.
@@ -51,6 +52,27 @@ const specs: Partial<Record<Measurement, MeasurementSpec>> = {
   nivel: { base: 55, swing: 35, decimals: 0, thresholds: [70, 90], min: 0, max: 100 },
 }
 
+/**
+ * A leak is an alarm condition, not a smooth reading — it can't share the
+ * sine-wave `MeasurementSpec` shape above. The state only re-rolls once per
+ * `epochTicks`, so it stays stable for a while instead of flickering every
+ * tick, and `chance` is kept low so a sensor reads "seco" most of the time.
+ */
+interface LeakSpec {
+  epochTicks: number
+  chance: number
+}
+
+const leakSpecs: Partial<Record<Measurement, LeakSpec>> = {
+  fuga: { epochTicks: 24, chance: 0.06 },
+}
+
+function simulateLeak(measurement: Measurement, sensorId: string, tick: number): number {
+  const spec = leakSpecs[measurement]!
+  const epoch = Math.floor(tick / spec.epochTicks)
+  return hash01(`${sensorId}:${measurement}:${epoch}`) < spec.chance ? 1 : 0
+}
+
 function hash01(text: string) {
   let h = 2166136261
   for (let i = 0; i < text.length; i += 1) {
@@ -70,6 +92,15 @@ function round(value: number, decimals: number) {
  * sensors drift apart the way real ones do, seeded from the device id.
  */
 export function sensorReading(measurement: Measurement, sensorId: string, tick: number): number | null {
+  // a device bound to a real DevEUI on a live TTN/ChirpStack link reads its
+  // actual uplinks — null here means "bound but not reported yet", i.e. wait
+  // for the next real uplink rather than fabricate a value
+  if (modoDados(sensorId) === 'real') {
+    return valorPorDispositivo(sensorId, measurement)
+  }
+
+  if (leakSpecs[measurement]) return simulateLeak(measurement, sensorId, tick)
+
   const spec = specs[measurement]
   if (!spec) return null
 
@@ -84,6 +115,7 @@ export function sensorReading(measurement: Measurement, sensorId: string, tick: 
 
 export function readingStatus(measurement: Measurement, value: number | null): ReadingStatus {
   if (value === null) return 'sem-dados'
+  if (measurement === 'fuga') return value > 0 ? 'mau' : 'bom'
   const spec = specs[measurement]
   if (!spec?.thresholds) return 'bom'
   const [fair, poor] = spec.thresholds
@@ -97,6 +129,7 @@ export function readingStatus(measurement: Measurement, value: number | null): R
 
 export function formatReading(measurement: Measurement, value: number | null): string {
   if (value === null) return '—'
+  if (measurement === 'fuga') return value > 0 ? 'Fuga detetada' : 'Seco'
   const unit = measurementUnits[measurement]
   return unit ? `${value} ${unit}` : `${value}`
 }
@@ -105,5 +138,31 @@ export function formatReading(measurement: Measurement, value: number | null): s
 export const primaryMeasurements: Measurement[] = ['temperatura', 'humidade', 'co2', 'tvoc', 'pm25', 'ruido', 'luz']
 
 export function hasSpec(measurement: Measurement) {
-  return specs[measurement] !== undefined
+  return specs[measurement] !== undefined || leakSpecs[measurement] !== undefined
+}
+
+/**
+ * The one measurement worth showing as a device's compact/marker-level
+ * reading — a leak sensor's alarm state, a level sensor's fill percentage
+ * (falling back to raw distance if a future catalog entry lacks 'nivel'),
+ * or the first `primaryMeasurements` entry the model actually reports.
+ */
+export function primaryReading(
+  model: DeviceModel,
+  sensorId: string,
+  tick: number,
+): { measurement: Measurement; value: number | null } | null {
+  if (model.category === 'agua' && model.measures.includes('fuga')) {
+    return { measurement: 'fuga', value: sensorReading('fuga', sensorId, tick) }
+  }
+  if (model.category === 'nivel') {
+    const measurement = model.measures.includes('nivel')
+      ? 'nivel'
+      : model.measures.includes('distancia')
+        ? 'distancia'
+        : null
+    return measurement ? { measurement, value: sensorReading(measurement, sensorId, tick) } : null
+  }
+  const measurement = primaryMeasurements.find((m) => model.measures.includes(m))
+  return measurement ? { measurement, value: sensorReading(measurement, sensorId, tick) } : null
 }
