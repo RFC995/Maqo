@@ -53,6 +53,8 @@ interface Scene3DProps {
   rooms: Room[]
   telemetryTick: number
   sensorsByRoom: Map<string, SensorSource[]>
+  /** read-only dashboard rendering: gateways stay visible across floors, sensor labels always show live data */
+  dashboardMode?: boolean
   onSelectDevice: (id: string | null) => void
   onPlaceInterior: (floor: number, x: number, z: number) => void
   onPlaceRoof: (x: number, z: number) => void
@@ -321,6 +323,7 @@ export function Scene3D({
   rooms,
   telemetryTick,
   sensorsByRoom,
+  dashboardMode = false,
   onSelectDevice,
   onPlaceInterior,
   onPlaceRoof,
@@ -472,6 +475,8 @@ export function Scene3D({
               propagation={propagation}
               coverageOpacity={coverageOpacity}
               labelsVisible={labelsVisible}
+              dashboardMode={dashboardMode}
+              telemetryTick={telemetryTick}
               onSelect={onSelectDevice}
             />
             {isActive && (

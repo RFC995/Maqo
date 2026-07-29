@@ -1,11 +1,25 @@
 import { useRef } from 'react'
 import type { TimeOfDay } from './Scene3D'
+import type { AppView } from '../types'
 import { MaqoLogo } from './Logo'
-import { DownloadIcon, UploadIcon, SunIcon, DuskIcon, MoonIcon, TargetIcon, PlusIcon, ReportIcon } from './icons'
+import {
+  DownloadIcon,
+  UploadIcon,
+  SunIcon,
+  DuskIcon,
+  MoonIcon,
+  TargetIcon,
+  PlusIcon,
+  ReportIcon,
+  BuildingIcon,
+  SignalIcon,
+} from './icons'
 
 interface TopBarProps {
   projectName: string
   onRename: (name: string) => void
+  view: AppView
+  onViewChange: (view: AppView) => void
   timeOfDay: TimeOfDay
   onTimeOfDay: (value: TimeOfDay) => void
   tema: 'light' | 'dark'
@@ -27,6 +41,8 @@ const timeOptions: { key: TimeOfDay; label: string; icon: typeof SunIcon }[] = [
 export function TopBar({
   projectName,
   onRename,
+  view,
+  onViewChange,
   timeOfDay,
   onTimeOfDay,
   tema,
@@ -55,20 +71,32 @@ export function TopBar({
       </div>
 
       <div className="topbar-center">
-        <div className="time-toggle">
-          {timeOptions.map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              type="button"
-              className={timeOfDay === key ? 'time-btn active' : 'time-btn'}
-              onClick={() => onTimeOfDay(key)}
-              title={label}
-            >
-              <Icon size={15} />
-              <span>{label}</span>
-            </button>
-          ))}
-        </div>
+        <button
+          type="button"
+          className="icon-btn view-toggle"
+          onClick={() => onViewChange(view === 'planeamento' ? 'dashboard' : 'planeamento')}
+          title={view === 'planeamento' ? 'Ver dashboard' : 'Voltar ao planeamento'}
+        >
+          {view === 'planeamento' ? <SignalIcon size={16} /> : <BuildingIcon size={16} />}
+          <span>{view === 'planeamento' ? 'Dashboard' : 'Planeamento'}</span>
+        </button>
+
+        {view === 'planeamento' && (
+          <div className="time-toggle">
+            {timeOptions.map(({ key, label, icon: Icon }) => (
+              <button
+                key={key}
+                type="button"
+                className={timeOfDay === key ? 'time-btn active' : 'time-btn'}
+                onClick={() => onTimeOfDay(key)}
+                title={label}
+              >
+                <Icon size={15} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="topbar-actions">

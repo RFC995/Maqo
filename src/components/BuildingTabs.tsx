@@ -6,11 +6,20 @@ interface BuildingTabsProps {
   devices: DeviceItem[]
   activeBuildingId: string
   onChange: (id: string) => void
-  onAdd: () => void
-  onDelete: (id: string) => void
+  onAdd?: () => void
+  onDelete?: (id: string) => void
+  readOnly?: boolean
 }
 
-export function BuildingTabs({ buildings, devices, activeBuildingId, onChange, onAdd, onDelete }: BuildingTabsProps) {
+export function BuildingTabs({
+  buildings,
+  devices,
+  activeBuildingId,
+  onChange,
+  onAdd,
+  onDelete,
+  readOnly = false,
+}: BuildingTabsProps) {
   function countFor(buildingId: string) {
     return devices.filter((d) => d.buildingId === buildingId).length
   }
@@ -31,7 +40,7 @@ export function BuildingTabs({ buildings, devices, activeBuildingId, onChange, o
           >
             {b.config.name}
             {count > 0 && <span className="tab-badge">{count}</span>}
-            {buildings.length > 1 && (
+            {!readOnly && onDelete && buildings.length > 1 && (
               <span
                 role="button"
                 tabIndex={-1}
@@ -49,10 +58,12 @@ export function BuildingTabs({ buildings, devices, activeBuildingId, onChange, o
         )
       })}
 
-      <button type="button" className="floor-tab" onClick={onAdd} title="Adicionar edificio">
-        <PlusIcon size={14} />
-        Novo edificio
-      </button>
+      {!readOnly && onAdd && (
+        <button type="button" className="floor-tab" onClick={onAdd} title="Adicionar edificio">
+          <PlusIcon size={14} />
+          Novo edificio
+        </button>
+      )}
     </div>
   )
 }

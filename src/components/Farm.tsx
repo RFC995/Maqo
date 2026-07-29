@@ -1,9 +1,9 @@
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { Instance, Instances } from '@react-three/drei'
 import * as THREE from 'three'
 import type { BuildingConfig } from '../types'
 import { gerarQuinta } from '../fieldGenerator'
-import { getGrassNormal, getGrassTexture, setRepeat } from '../textures'
+import { getGrassMaps } from '../textures'
 import type { TimeOfDay } from './Scene3D'
 
 interface FarmProps {
@@ -18,13 +18,6 @@ function cropColor(shade: number) {
   return new THREE.Color().lerpColors(cropDark, cropLight, Math.max(0, Math.min(1, shade)))
 }
 
-function cloneWithRepeat(base: ReturnType<typeof getGrassTexture>, width: number, depth: number, tile: number) {
-  const t = base.clone()
-  t.needsUpdate = true
-  setRepeat(t, Math.max(1, width / tile), Math.max(1, depth / tile))
-  return t
-}
-
 /**
  * The Smart Agriculture world: a farm. Planted field beds in rows, a glass
  * greenhouse, a red barn with a silo, a post-and-rail fence and trees — drawn
@@ -36,12 +29,10 @@ export function Farm({ building, seed, timeOfDay }: FarmProps) {
   const grassW = q.w + 90
   const grassD = q.d + 90
 
-  const grass = useMemo(() => {
-    const map = cloneWithRepeat(getGrassTexture(), grassW, grassD, 3)
-    const normal = cloneWithRepeat(getGrassNormal(), grassW, grassD, 3)
-    return { map, normal }
-  }, [grassW, grassD])
-  useEffect(() => () => { grass.map.dispose(); grass.normal.dispose() }, [grass])
+  const grass = useMemo(
+    () => getGrassMaps(Math.max(1, grassW / 3), Math.max(1, grassD / 3)),
+    [grassW, grassD],
+  )
 
   const rowW = q.beds[0]?.w ?? 8
   const isNight = timeOfDay === 'night'

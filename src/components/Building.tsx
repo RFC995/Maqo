@@ -12,7 +12,7 @@ import {
   generateRoofEquipment,
   styleConfigs,
 } from '../buildingGenerator'
-import { getGravelNormal, getGravelTexture, getWallNormal, setRepeat } from '../textures'
+import { getRoofMaps, getWallMaps } from '../textures'
 import plasterUrl from '../assets/textures/painted_plaster_wall.jpg'
 import concrete008Url from '../assets/textures/concrete_wall_008.jpg'
 import brickUrl from '../assets/textures/red_brick_03.jpg'
@@ -93,23 +93,17 @@ export function BuildingModel({ building, seed, activeFloor, litBoost }: Buildin
     map.needsUpdate = true
     map.wrapS = map.wrapT = THREE.RepeatWrapping
     map.colorSpace = THREE.SRGBColorSpace
-    setRepeat(map, rx, ry)
-    const normal = getWallNormal().clone()
-    normal.needsUpdate = true
-    setRepeat(normal, rx, ry)
+    map.repeat.set(rx, ry)
+    const normal = getWallMaps(rx, ry).normal
     return { map, normal }
   }, [wallReal, building.width, building.floorHeight])
 
+  // flat roofs are commonly ballasted with gravel — the "roof" photo set is
+  // the closest real-material match to the old procedural gravel texture
   const roofMaps = useMemo(() => {
     const rx = Math.max(1, building.width / 5)
     const ry = Math.max(1, building.depth / 5)
-    const map = getGravelTexture().clone()
-    map.needsUpdate = true
-    setRepeat(map, rx, ry)
-    const normal = getGravelNormal().clone()
-    normal.needsUpdate = true
-    setRepeat(normal, rx, ry)
-    return { map, normal }
+    return getRoofMaps(rx, ry)
   }, [building.width, building.depth])
 
   return (

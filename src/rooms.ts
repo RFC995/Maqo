@@ -1,7 +1,7 @@
-import type { Building, BuildingConfig, Project, Room, RoomKind } from './types'
+import type { Building, BuildingConfig, DeviceItem, Project, Room, RoomKind } from './types'
 import { roomKindLabels } from './types'
 import { createRng } from './buildingGenerator'
-import type { Measurement } from './catalog'
+import { resolveModel, type Measurement } from './catalog'
 import { primaryMeasurements, readingStatus, sensorReading, type ReadingStatus } from './telemetry'
 
 export type { Room, RoomKind }
@@ -251,6 +251,28 @@ export const statusColors: Record<RoomStatus, string> = {
   warm: '#f59e0b',
   hot: '#ef4444',
   nodata: '#5b6472',
+}
+
+/** Groups a floor's interior devices by which room contains them, resolving each one's catalog measures. */
+export function sensorsByRoomFor(devices: DeviceItem[], rooms: Room[], activeFloor: number): Map<string, SensorSource[]> {
+  const map = new Map<string, SensorSource[]>()
+  for (const device of devices) {
+    if (device.mount !== 'interior' || device.floor !== activeFloor) continue
+    const model = resolveModel(device.modelId)
+    const source: SensorSource = {
+      sensorId: device.id,
+      measures: model?.measures ?? (device.type === 'sensor' ? ['temperatura', 'humidade'] : []),
+    }
+    for (const room of rooms) {
+      if (pointInRoom(room, device.x, device.z)) {
+        const list = map.get(room.id) ?? []
+        list.push(source)
+        map.set(room.id, list)
+        break
+      }
+    }
+  }
+  return map
 }
 
 export function pointInRoom(room: Room, x: number, z: number) {

@@ -4,13 +4,7 @@ import * as THREE from 'three'
 import type { BuildingConfig, DeviceItem } from '../types'
 import { gerarParque, pointInBay, BAY_W, BAY_D, type Bay } from '../parkingGenerator'
 import { sensorReading } from '../telemetry'
-import {
-  getAsphaltNormal,
-  getAsphaltTexture,
-  getGrassNormal,
-  getGrassTexture,
-  setRepeat,
-} from '../textures'
+import { getAsphaltMaps, getGrassMaps } from '../textures'
 import type { TimeOfDay } from './Scene3D'
 
 interface ParkingLotProps {
@@ -22,13 +16,6 @@ interface ParkingLotProps {
 }
 
 const carColors = ['#d7dbe0', '#f4f5f7', '#1c2128', '#3b6db3', '#b23b3b', '#8a9099', '#2f6f52', '#c9a13b']
-
-function cloneWithRepeat(base: ReturnType<typeof getAsphaltTexture>, width: number, depth: number, tile: number) {
-  const texture = base.clone()
-  texture.needsUpdate = true
-  setRepeat(texture, Math.max(1, width / tile), Math.max(1, depth / tile))
-  return texture
-}
 
 /**
  * The Smart Parking world: a surface car park drawn from the same procedural
@@ -44,26 +31,14 @@ export function ParkingLot({ building, seed, timeOfDay, devices, telemetryTick }
   const grassW = lotW + 90
   const grassD = lotD + 90
 
-  const asphaltMaps = useMemo(() => {
-    const map = cloneWithRepeat(getAsphaltTexture(), lotW, lotD, 2.4)
-    const normal = cloneWithRepeat(getAsphaltNormal(), lotW, lotD, 2.4)
-    return { map, normal }
-  }, [lotW, lotD])
+  const asphaltMaps = useMemo(
+    () => getAsphaltMaps(Math.max(1, lotW / 2.4), Math.max(1, lotD / 2.4)),
+    [lotW, lotD],
+  )
 
-  const grassMaps = useMemo(() => {
-    const map = cloneWithRepeat(getGrassTexture(), grassW, grassD, 3.1)
-    const normal = cloneWithRepeat(getGrassNormal(), grassW, grassD, 3.1)
-    return { map, normal }
-  }, [grassW, grassD])
-
-  useEffect(
-    () => () => {
-      asphaltMaps.map.dispose()
-      asphaltMaps.normal.dispose()
-      grassMaps.map.dispose()
-      grassMaps.normal.dispose()
-    },
-    [asphaltMaps, grassMaps],
+  const grassMaps = useMemo(
+    () => getGrassMaps(Math.max(1, grassW / 3.1), Math.max(1, grassD / 3.1)),
+    [grassW, grassD],
   )
 
   // which bays a sensor is watching, and whether each bay is occupied right now

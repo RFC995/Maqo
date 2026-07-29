@@ -32,6 +32,9 @@ export type MountType = 'roof' | 'interior' | 'ground'
 /** Pseudo floor selectors used by the UI in addition to real floor indices. */
 export type FloorSelector = number | 'roof' | 'ground' | 'all'
 
+/** Top-level app view: the editable planning workspace vs. the read-only dashboard. */
+export type AppView = 'planeamento' | 'dashboard'
+
 export interface DeviceItem {
   id: string
   /** which building this device belongs to; x/z below are local to that building */

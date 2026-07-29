@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
 import './App.css'
-import type { Building, BuildingConfig, Cenario, DeviceItem, DeviceType, FloorSelector, Project } from './types'
+import type { AppView, Building, BuildingConfig, Cenario, DeviceItem, DeviceType, FloorSelector, Project } from './types'
 import { deviceLabels } from './types'
 import {
   createDefaultProject,
@@ -15,7 +15,7 @@ import { cenarioMeta, criarProjetoDeCenario } from './cenarios'
 import { Onboarding } from './components/Onboarding'
 import { createBuilding } from './buildings'
 import type { PlanPreset } from './planPresets'
-import { clampRoom, createRoom, isFloorCustomised, pointInRoom, resolveRooms, type SensorSource } from './rooms'
+import { clampRoom, createRoom, isFloorCustomised, resolveRooms, sensorsByRoomFor, type SensorSource } from './rooms'
 import type { Room } from './types'
 import { defaultModelFor, resolveModel } from './catalog'
 import { propagationPresets } from './rf'
@@ -36,6 +36,7 @@ import type { TimeOfDay } from './components/Scene3D'
 import type { Qualidade } from './qualidade'
 import { FloorPlan2D } from './components/FloorPlan2D'
 import { DevicesPanel } from './components/DevicesPanel'
+import { Dashboard } from './components/Dashboard'
 import { GatewayIcon } from './components/icons'
 
 /**
@@ -55,6 +56,7 @@ function VistaACarregar() {
 }
 
 function App() {
+  const [view, setView] = useState<AppView>('planeamento')
   const [project, setProject] = useState<Project>(() => loadProject() ?? createDefaultProject())
   // first run (no saved project) opens the template picker instead of dropping
   // straight into a default building
@@ -135,27 +137,10 @@ function App() {
     [project, activeBuilding, activeFloor],
   )
 
-  const sensorsByRoom = useMemo(() => {
-    const map = new Map<string, SensorSource[]>()
-    if (typeof activeFloor !== 'number') return map
-    for (const device of devices) {
-      if (device.mount !== 'interior' || device.floor !== activeFloor) continue
-      const model = resolveModel(device.modelId)
-      const source: SensorSource = {
-        sensorId: device.id,
-        measures: model?.measures ?? (device.type === 'sensor' ? ['temperatura', 'humidade'] : []),
-      }
-      for (const room of rooms) {
-        if (pointInRoom(room, device.x, device.z)) {
-          const list = map.get(room.id) ?? []
-          list.push(source)
-          map.set(room.id, list)
-          break
-        }
-      }
-    }
-    return map
-  }, [devices, rooms, activeFloor])
+  const sensorsByRoom = useMemo(
+    () => (typeof activeFloor === 'number' ? sensorsByRoomFor(devices, rooms, activeFloor) : new Map<string, SensorSource[]>()),
+    [devices, rooms, activeFloor],
+  )
 
   useEffect(() => {
     // don't persist while the picker is open — otherwise the placeholder project
@@ -515,6 +500,8 @@ function App() {
       <TopBar
         projectName={building.name}
         onRename={(name) => updateBuilding({ name })}
+        view={view}
+        onViewChange={setView}
         timeOfDay={timeOfDay}
         onTimeOfDay={setTimeOfDay}
         tema={tema}
@@ -533,6 +520,7 @@ function App() {
         }
       />
 
+      {view === 'planeamento' && (
       <div className="workspace">
         <Sidebar
           building={building}
@@ -714,6 +702,11 @@ function App() {
           )}
         </main>
       </div>
+      )}
+
+      {view === 'dashboard' && (
+        <Dashboard project={project} telemetryTick={telemetryTick} propagation={propagation} />
+      )}
     </div>
   )
 }

@@ -182,6 +182,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 8px;
   gap: 16px;
   padding: 11px 20px;
   background: var(--chrome-bg);
@@ -195,7 +197,13 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  min-width: 0;
+  flex-shrink: 0;
+}
+
+.topbar-center {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 /* ---------- Brand lockup ---------- */
@@ -1208,6 +1216,14 @@ button.secondary:hover {
   cursor: grabbing;
 }
 
+.floorplan-marker.readonly {
+  cursor: pointer;
+}
+
+.floorplan-marker.readonly:active {
+  cursor: pointer;
+}
+
 .floorplan-hint {
   text-align: center;
   font-size: 0.72rem;
@@ -1215,6 +1231,171 @@ button.secondary:hover {
   padding: 7px;
   background: var(--surface-inset);
   border-top: 1px solid var(--border);
+}
+
+/* ---------- Dashboard ---------- */
+.dashboard {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.dashboard-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.dashboard-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.dashboard-scene {
+  flex: 1 1 62%;
+  position: relative;
+  min-width: 0;
+}
+
+.dashboard-scene canvas {
+  display: block;
+}
+
+.dashboard-map {
+  flex: 0 0 36%;
+  max-width: 420px;
+  min-width: 260px;
+  border-left: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--surface), var(--surface-inset));
+  display: flex;
+}
+
+.dashboard-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--chrome-bg);
+}
+
+.kpi-tile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  min-width: 118px;
+}
+
+.kpi-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.kpi-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.kpi-value {
+  font-size: 1.15rem;
+  font-weight: 750;
+  color: var(--text);
+}
+
+.kpi-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.kpi-tile.alert {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.kpi-tile.alert .kpi-icon,
+.kpi-tile.alert .kpi-value {
+  color: var(--danger);
+}
+
+.dashboard-detail {
+  flex: 0 0 360px;
+  max-width: 400px;
+  min-width: 300px;
+  border-left: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--surface), var(--surface-inset));
+  overflow-y: auto;
+  padding: 18px;
+}
+
+.dashboard-detail-empty {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  text-align: center;
+  padding-top: 32px;
+}
+
+.dashboard-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dashboard-detail-title {
+  font-size: 0.98rem;
+  font-weight: 750;
+  color: var(--text);
+}
+
+.dashboard-detail-sub {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.dashboard-detail-close {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--tint-5);
+  color: var(--text-muted);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.dashboard-detail-close:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.dashboard-detail-section {
+  margin-top: 14px;
+}
+
+.dashboard-detail-meta {
+  margin-top: 14px;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+}
+
+.leitura-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 /* ---------- 3D device labels ---------- */
@@ -2233,6 +2414,29 @@ button.secondary:hover {
   font-weight: 750;
   letter-spacing: 0.01em;
   color: #e2e8f0;
+}
+
+/* ---------- Dashboard 3D labels: icon + live reading + link, always on ---------- */
+.device-label.dashboard {
+  gap: 8px;
+  padding: 5px 12px 5px 8px;
+}
+
+.device-label-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.device-label-value {
+  font-size: 10.5px;
+  font-weight: 750;
+}
+
+.device-label-link {
+  font-size: 9px;
+  font-weight: 600;
 }
 
 /* ---------- Room stats: show that the track scrolls ---------- */
@@ -3387,11 +3591,13 @@ button.secondary:hover {
   transform: none;
 }
 /* the auto-save note is secondary — only show it when the top bar has room,
-   so it never collides with the time selector on narrower screens */
+   so it never collides with the view switch + time selector on narrower
+   screens (the view switch added a second pill group to topbar-center,
+   so this needs more headroom than before) */
 .saved-indicator {
   display: none;
 }
-@media (min-width: 1400px) {
+@media (min-width: 1900px) {
   .saved-indicator {
     display: inline-flex;
     align-items: center;
