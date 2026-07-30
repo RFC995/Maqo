@@ -2251,6 +2251,23 @@ button.secondary:hover {
   flex-wrap: wrap;
 }
 
+.seat-fill {
+  margin-top: 11px;
+  padding: 11px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(34, 197, 94, 0.24);
+  background: rgba(34, 197, 94, 0.05);
+}
+
+.seat-fill .secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  padding: 7px 12px;
+  margin-top: 8px;
+}
+
 .room-actions .secondary {
   display: inline-flex;
   align-items: center;

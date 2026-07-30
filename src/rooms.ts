@@ -111,6 +111,70 @@ export function createRoom(building: BuildingConfig, existing: Room[]): Room {
   }
 }
 
+export interface SeatAnchor {
+  x: number
+  z: number
+  /** which way the chair faces, so furniture and any future device marker agree */
+  rotY: number
+}
+
+/** Table footprint for a meeting room, clamped so it never crowds a small room. */
+export function meetingTableSpan(room: Room): { w: number; d: number } {
+  return { w: Math.min(room.width - 1.8, 3.2), d: Math.min(room.depth - 1.8, 1.3) }
+}
+
+/**
+ * One seat per chair around the meeting table, in world coordinates — the
+ * same anchors the meeting-room furniture is drawn from (see MeetingTable in
+ * Interior.tsx), so "one sensor per seat" always lines up with a real chair.
+ */
+export function meetingSeats(room: Room): SeatAnchor[] {
+  const { w, d } = meetingTableSpan(room)
+  const perSide = Math.max(2, Math.floor(w / 0.9))
+  const seats: SeatAnchor[] = []
+  for (let i = 0; i < perSide; i += 1) {
+    const cx = room.x - w / 2 + ((i + 0.5) / perSide) * w
+    seats.push({ x: cx, z: room.z + d / 2 + 0.35, rotY: 0 })
+    seats.push({ x: cx, z: room.z - d / 2 - 0.35, rotY: Math.PI })
+  }
+  return seats
+}
+
+const DESK_SPACING_X = 2.1
+const DESK_SPACING_Z = 2.4
+
+/**
+ * One seat per desk in an open-space grid, in world coordinates — a desk IS
+ * the seat here, since a desk-occupancy sensor (e.g. Milesight VS341) mounts
+ * under the desk itself rather than the chair.
+ */
+export function openspaceSeats(room: Room): SeatAnchor[] {
+  const cols = Math.max(1, Math.floor((room.width - 1.6) / DESK_SPACING_X))
+  const rows = Math.max(1, Math.floor((room.depth - 1.6) / DESK_SPACING_Z))
+  const seats: SeatAnchor[] = []
+  for (let r = 0; r < rows; r += 1) {
+    for (let c = 0; c < cols; c += 1) {
+      seats.push({
+        x: room.x - ((cols - 1) * DESK_SPACING_X) / 2 + c * DESK_SPACING_X,
+        z: room.z - ((rows - 1) * DESK_SPACING_Z) / 2 + r * DESK_SPACING_Z,
+        rotY: r % 2 === 0 ? 0 : Math.PI,
+      })
+    }
+  }
+  return seats
+}
+
+/**
+ * Every seat a sensor could be bulk-placed at, for room kinds with repeated
+ * per-seat furniture. Empty for kinds without individual seats (storage,
+ * corridors, reception...).
+ */
+export function seatsForRoom(room: Room): SeatAnchor[] {
+  if (room.kind === 'reuniao') return meetingSeats(room)
+  if (room.kind === 'openspace') return openspaceSeats(room)
+  return []
+}
+
 /** Keeps a room inside the building footprint after a move or a resize. */
 export function clampRoom(room: Room, building: BuildingConfig): Room {
   const inset = 0.45

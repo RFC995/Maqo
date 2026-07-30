@@ -44,7 +44,7 @@ export function artworkFor(model: DeviceModel): ArtworkKind {
   if (model.type === 'gateway') return 'gateway-indoor'
 
   if (id.startsWith('ms-am')) return 'panel-eink'
-  if (id === 'ms-ws202' || id === 'ms-ws203') return 'pir'
+  if (id === 'ms-ws202' || id === 'ms-ws203' || id === 'tek-vivid-v3') return 'pir'
   if (id === 'ms-ws301' || id === 'ms-em300-mcs') return 'contact'
   if (id === 'ms-ws303' || id === 'ms-em300-sld' || id === 'ms-em300-zld') return 'leak'
   if (id === 'ms-ws156') return 'scene-panel'

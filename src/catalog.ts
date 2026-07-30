@@ -196,6 +196,7 @@ export interface DeviceModel {
 }
 
 const MILESIGHT = 'Milesight'
+const TEKTELIC = 'Tektelic'
 
 /** 2 x 2700 mAh ER14505 Li-SOCl2, the pack used across most AM/VS units. */
 function pack(cells: number, mah: number, chemistry: string, years: [number, number]): BatterySpec {
@@ -742,6 +743,32 @@ export const deviceCatalog: DeviceModel[] = [
     detection: { rangeM: 0.4, accuracy: 'ate 98%' },
     radius: 2,
     description: 'Sensor por posto de trabalho, montado sob a secretaria. Distancia otima 20 a 40 cm.',
+  },
+
+  // -------------------------------------------------------------- Tektelic
+  {
+    id: 'tek-vivid-v3',
+    brand: TEKTELIC,
+    model: 'VIVID v3',
+    name: 'VIVID v3 Ocupacao de sala',
+    type: 'sensor',
+    category: 'ocupacao',
+    measures: ['ocupacao', 'movimento', 'temperatura', 'humidade', 'luz', 'porta'],
+    power: ['bateria'],
+    battery: pack(1, 1000, 'CR2477 Li-MnO2', [3.5, 4]),
+    ip: 'IP65',
+    mounting: ['Parede', 'Teto', 'Secretaria (twist-lock)'],
+    tempRange: [0, 60],
+    radio: { class: 'A', antennaDbi: 2 },
+    detection: {
+      fovH: 86,
+      fovV: 74,
+      mountHeight: [0.75, 4],
+      accuracy: 'array PIR de 64 pixeis, mascaras configuraveis por zona',
+    },
+    radius: 5,
+    description:
+      'Sensor de ocupacao de sala LoRaWAN com PIR de 64 pixeis, temperatura, humidade, luz ambiente e deteccao magnetica (porta/janela/gaveta). Montagem twist-lock em parede, teto ou secretaria, IP65, 4+ anos com 1 x CR2477.',
   },
 
   // ------------------------------------------------------------ nivel / dist

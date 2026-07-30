@@ -631,6 +631,20 @@ function LigacaoReal({
         ))}
       </datalist>
 
+      {detetados.length > 0 && (
+        <label>
+          Associar a um sensor detetado
+          <select value="" onChange={(event) => event.target.value && onUpdate({ devEui: event.target.value })}>
+            <option value="">Selecionar...</option>
+            {detetados.map((d) => (
+              <option key={d.devEui} value={d.devEui}>
+                {d.deviceId ?? d.devEui} — {d.devEui}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
       {!euiNorm ? (
         <p className="panel-hint">
           Associa o DevEUI do sensor real para o dashboard mostrar os dados vindos da TTN / ChirpStack em vez dos

@@ -15,7 +15,15 @@ import { cenarioMeta, criarProjetoDeCenario } from './cenarios'
 import { Onboarding } from './components/Onboarding'
 import { createBuilding } from './buildings'
 import type { PlanPreset } from './planPresets'
-import { clampRoom, createRoom, isFloorCustomised, resolveRooms, sensorsByRoomFor, type SensorSource } from './rooms'
+import {
+  clampRoom,
+  createRoom,
+  isFloorCustomised,
+  resolveRooms,
+  seatsForRoom,
+  sensorsByRoomFor,
+  type SensorSource,
+} from './rooms'
 import type { Room } from './types'
 import { defaultModelFor, resolveModel } from './catalog'
 import { propagationPresets } from './rf'
@@ -330,6 +338,37 @@ function App() {
     setSelectedDeviceId(device.id)
   }
 
+  /**
+   * One sensor per chair/desk in a room (meeting table, open-space grid...),
+   * anchored to the exact same seat positions the furniture is drawn from.
+   * Seats already carrying a device are skipped, so pressing this again after
+   * moving something just fills the gaps instead of stacking duplicates.
+   */
+  function addSensorsAtSeats(room: Room, modelId: string) {
+    if (typeof activeFloor !== 'number') return
+    const seats = seatsForRoom(room)
+    if (seats.length === 0) return
+    const model = resolveModel(modelId) ?? defaultModelFor('sensor')
+    const occupied = devices.filter((d) => d.mount === 'interior' && d.floor === activeFloor)
+    const emptySeats = seats.filter((seat) => !occupied.some((d) => Math.hypot(d.x - seat.x, d.z - seat.z) < 0.4))
+    if (emptySeats.length === 0) return
+    const countOfType = devices.filter((d) => d.type === 'sensor').length
+    const novos: DeviceItem[] = emptySeats.map((seat, i) => ({
+      id: crypto.randomUUID(),
+      buildingId: activeBuilding.id,
+      type: 'sensor',
+      modelId: model.id,
+      name: `${deviceLabels.sensor} ${countOfType + i + 1}`,
+      mount: 'interior',
+      floor: activeFloor,
+      x: seat.x,
+      z: seat.z,
+      radius: model.radius,
+      notes: '',
+    }))
+    setProject((p) => ({ ...p, devices: [...p.devices, ...novos], updatedAt: new Date().toISOString() }))
+  }
+
   function moveDevice(id: string, x: number, z: number) {
     setProject((p) => ({
       ...p,
@@ -554,6 +593,7 @@ function App() {
                 onAddRoom={addRoom}
                 onDeleteRoom={deleteRoom}
                 onResetFloor={resetFloorRooms}
+                onFillSeats={addSensorsAtSeats}
               />
             ) : null
           }

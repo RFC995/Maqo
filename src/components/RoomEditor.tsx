@@ -1,5 +1,8 @@
+import { useState } from 'react'
 import { roomKindLabels, type BuildingConfig, type Room, type RoomKind } from '../types'
-import { LayersIcon, PlusIcon, TrashIcon } from './icons'
+import { deviceCatalog } from '../catalog'
+import { seatsForRoom } from '../rooms'
+import { LayersIcon, PlusIcon, PresenceIcon, TrashIcon } from './icons'
 
 interface RoomEditorProps {
   building: BuildingConfig
@@ -12,7 +15,11 @@ interface RoomEditorProps {
   onAddRoom: () => void
   onDeleteRoom: (id: string) => void
   onResetFloor: () => void
+  onFillSeats: (room: Room, modelId: string) => void
 }
+
+/** Sensors that actually report presence/occupancy — the ones worth offering for a "one per seat" fill. */
+const seatSensorModels = deviceCatalog.filter((m) => m.type === 'sensor' && m.measures.includes('ocupacao'))
 
 /**
  * Floor plan editor: rename rooms, change what they are used for, resize and
@@ -30,8 +37,10 @@ export function RoomEditor({
   onAddRoom,
   onDeleteRoom,
   onResetFloor,
+  onFillSeats,
 }: RoomEditorProps) {
   const selected = rooms.find((r) => r.id === selectedRoomId) ?? null
+  const [seatModelId, setSeatModelId] = useState(seatSensorModels.find((m) => m.id === 'ms-vs341')?.id ?? seatSensorModels[0]?.id ?? '')
 
   return (
     <section className="panel room-editor">
@@ -167,6 +176,37 @@ export function RoomEditor({
               <option value="-1">Sul (+Z)</option>
             </select>
           </label>
+
+          {(() => {
+            const seats = seatsForRoom(selected)
+            if (seats.length === 0) return null
+            return (
+              <div className="seat-fill">
+                <label>
+                  Sensor a colocar
+                  <select value={seatModelId} onChange={(event) => setSeatModelId(event.target.value)}>
+                    {seatSensorModels.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.brand} {m.model} &mdash; {m.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => seatModelId && onFillSeats(selected, seatModelId)}
+                  disabled={!seatModelId}
+                >
+                  <PresenceIcon size={13} /> Colocar sensor em cada lugar ({seats.length})
+                </button>
+                <p className="panel-hint">
+                  Cria um sensor de ocupacao por cadeira/secretaria desta sala, na mesma posicao do mobiliario. Lugares
+                  ja com sensor sao ignorados.
+                </p>
+              </div>
+            )
+          })()}
 
           <p className="panel-hint">
             Area util <strong>{(selected.width * selected.depth).toFixed(1)} m&sup2;</strong>. Os sensores colocados

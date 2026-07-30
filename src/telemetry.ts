@@ -53,22 +53,24 @@ const specs: Partial<Record<Measurement, MeasurementSpec>> = {
 }
 
 /**
- * A leak is an alarm condition, not a smooth reading — it can't share the
- * sine-wave `MeasurementSpec` shape above. The state only re-rolls once per
- * `epochTicks`, so it stays stable for a while instead of flickering every
- * tick, and `chance` is kept low so a sensor reads "seco" most of the time.
+ * On/off readings that can't share the sine-wave `MeasurementSpec` shape
+ * above — a leak is a rare alarm condition, occupancy flips between meeting
+ * blocks. The state only re-rolls once per `epochTicks`, so it stays stable
+ * for a while instead of flickering every tick, and `chance` sets how often
+ * the "on" state (leak / occupied) comes up.
  */
-interface LeakSpec {
+interface BinarySpec {
   epochTicks: number
   chance: number
 }
 
-const leakSpecs: Partial<Record<Measurement, LeakSpec>> = {
+const binarySpecs: Partial<Record<Measurement, BinarySpec>> = {
   fuga: { epochTicks: 24, chance: 0.06 },
+  ocupacao: { epochTicks: 90, chance: 0.4 },
 }
 
-function simulateLeak(measurement: Measurement, sensorId: string, tick: number): number {
-  const spec = leakSpecs[measurement]!
+function simulateBinary(measurement: Measurement, sensorId: string, tick: number): number {
+  const spec = binarySpecs[measurement]!
   const epoch = Math.floor(tick / spec.epochTicks)
   return hash01(`${sensorId}:${measurement}:${epoch}`) < spec.chance ? 1 : 0
 }
@@ -99,7 +101,7 @@ export function sensorReading(measurement: Measurement, sensorId: string, tick: 
     return valorPorDispositivo(sensorId, measurement)
   }
 
-  if (leakSpecs[measurement]) return simulateLeak(measurement, sensorId, tick)
+  if (binarySpecs[measurement]) return simulateBinary(measurement, sensorId, tick)
 
   const spec = specs[measurement]
   if (!spec) return null
@@ -116,6 +118,7 @@ export function sensorReading(measurement: Measurement, sensorId: string, tick: 
 export function readingStatus(measurement: Measurement, value: number | null): ReadingStatus {
   if (value === null) return 'sem-dados'
   if (measurement === 'fuga') return value > 0 ? 'mau' : 'bom'
+  if (measurement === 'ocupacao') return value > 0 ? 'mau' : 'bom'
   const spec = specs[measurement]
   if (!spec?.thresholds) return 'bom'
   const [fair, poor] = spec.thresholds
@@ -130,15 +133,30 @@ export function readingStatus(measurement: Measurement, value: number | null): R
 export function formatReading(measurement: Measurement, value: number | null): string {
   if (value === null) return '—'
   if (measurement === 'fuga') return value > 0 ? 'Fuga detetada' : 'Seco'
+  if (measurement === 'ocupacao') return value > 0 ? 'Ocupada' : 'Livre'
   const unit = measurementUnits[measurement]
   return unit ? `${value} ${unit}` : `${value}`
 }
 
-/** The measurements worth showing on a room callout, in priority order. */
-export const primaryMeasurements: Measurement[] = ['temperatura', 'humidade', 'co2', 'tvoc', 'pm25', 'ruido', 'luz']
+/**
+ * The measurements worth showing on a room callout, in priority order.
+ * `ocupacao` leads: on an occupancy sensor (Tektelic VIVID v3, Milesight
+ * VS-series) that's the one reading worth surfacing, ahead of any comfort
+ * data the same device also reports.
+ */
+export const primaryMeasurements: Measurement[] = [
+  'ocupacao',
+  'temperatura',
+  'humidade',
+  'co2',
+  'tvoc',
+  'pm25',
+  'ruido',
+  'luz',
+]
 
 export function hasSpec(measurement: Measurement) {
-  return specs[measurement] !== undefined || leakSpecs[measurement] !== undefined
+  return specs[measurement] !== undefined || binarySpecs[measurement] !== undefined
 }
 
 /**

@@ -1,11 +1,15 @@
 import { Fragment } from 'react'
 import { Html } from '@react-three/drei'
 import {
+  meetingSeats,
+  meetingTableSpan,
+  openspaceSeats,
   roomClimateFromSensors,
   statusColors,
   type LiveReadings,
   type Room,
   type RoomClimate,
+  type SeatAnchor,
   type SensorSource,
 } from '../rooms'
 import type { BuildingConfig } from '../types'
@@ -158,6 +162,39 @@ const woodColor = '#c8a06a'
 const darkColor = '#3c4148'
 const seatColor = '#5b6570'
 
+/**
+ * A proper office chair — four legs, a seat cushion and a backrest — instead
+ * of a flat box. `rotY` is measured with the open (knee) side facing local
+ * -Z, so it drops straight into a `SeatAnchor` (Desk and MeetingTable both
+ * place one this way, at the exact spot a "sensor per seat" also anchors to).
+ */
+function Chair({ x, z, rotY = 0 }: { x: number; z: number; rotY?: number }) {
+  const legs: [number, number][] = [
+    [-0.17, -0.17],
+    [0.17, -0.17],
+    [-0.17, 0.17],
+    [0.17, 0.17],
+  ]
+  return (
+    <group position={[x, 0, z]} rotation={[0, rotY, 0]}>
+      {legs.map(([lx, lz], i) => (
+        <mesh key={i} position={[lx, 0.22, lz]} castShadow>
+          <cylinderGeometry args={[0.017, 0.017, 0.44, 6]} />
+          <meshStandardMaterial color={darkColor} roughness={0.4} metalness={0.35} />
+        </mesh>
+      ))}
+      <mesh position={[0, 0.46, 0]} castShadow>
+        <boxGeometry args={[0.42, 0.06, 0.42]} />
+        <meshStandardMaterial color={seatColor} roughness={0.75} />
+      </mesh>
+      <mesh position={[0, 0.7, 0.19]} castShadow>
+        <boxGeometry args={[0.42, 0.46, 0.05]} />
+        <meshStandardMaterial color={seatColor} roughness={0.75} />
+      </mesh>
+    </group>
+  )
+}
+
 function Desk({ x, z, rotY = 0 }: { x: number; z: number; rotY?: number }) {
   return (
     <group position={[x, 0.1, z]} rotation={[0, rotY, 0]}>
@@ -175,25 +212,12 @@ function Desk({ x, z, rotY = 0 }: { x: number; z: number; rotY?: number }) {
         <boxGeometry args={[0.5, 0.3, 0.03]} />
         <meshStandardMaterial color="#1c2026" roughness={0.3} />
       </mesh>
-      <mesh position={[0, 0.45, 0.62]} castShadow>
-        <boxGeometry args={[0.46, 0.1, 0.46]} />
-        <meshStandardMaterial color={seatColor} roughness={0.8} />
-      </mesh>
-      <mesh position={[0, 0.72, 0.83]} castShadow>
-        <boxGeometry args={[0.46, 0.5, 0.08]} />
-        <meshStandardMaterial color={seatColor} roughness={0.8} />
-      </mesh>
+      <Chair x={0} z={0.62} />
     </group>
   )
 }
 
-function MeetingTable({ x, z, w, d }: { x: number; z: number; w: number; d: number }) {
-  const chairs: [number, number][] = []
-  const perSide = Math.max(2, Math.floor(w / 0.9))
-  for (let i = 0; i < perSide; i += 1) {
-    const cx = -w / 2 + ((i + 0.5) / perSide) * w
-    chairs.push([cx, d / 2 + 0.35], [cx, -d / 2 - 0.35])
-  }
+function MeetingTable({ x, z, w, d, seats }: { x: number; z: number; w: number; d: number; seats: SeatAnchor[] }) {
   return (
     <group position={[x, 0.1, z]}>
       <mesh position={[0, 0.74, 0]} castShadow>
@@ -204,11 +228,8 @@ function MeetingTable({ x, z, w, d }: { x: number; z: number; w: number; d: numb
         <boxGeometry args={[w * 0.5, 0.74, d * 0.4]} />
         <meshStandardMaterial color={darkColor} roughness={0.6} />
       </mesh>
-      {chairs.map(([cx, cz], i) => (
-        <mesh key={i} position={[cx, 0.45, cz]} castShadow>
-          <boxGeometry args={[0.44, 0.1, 0.44]} />
-          <meshStandardMaterial color={seatColor} roughness={0.8} />
-        </mesh>
+      {seats.map((seat, i) => (
+        <Chair key={i} x={seat.x - x} z={seat.z - z} rotY={seat.rotY} />
       ))}
     </group>
   )
@@ -284,35 +305,25 @@ function RoomFurniture({ room }: { room: Room }) {
 
   switch (room.kind) {
     case 'openspace': {
-      const cols = Math.max(1, Math.floor((w - 1.6) / 2.1))
-      const rows = Math.max(1, Math.floor((d - 1.6) / 2.4))
-      const desks = []
-      for (let r = 0; r < rows; r += 1) {
-        for (let c = 0; c < cols; c += 1) {
-          desks.push(
-            <Desk
-              key={`${r}-${c}`}
-              x={cx - ((cols - 1) * 2.1) / 2 + c * 2.1}
-              z={cz - ((rows - 1) * 2.4) / 2 + r * 2.4}
-              rotY={r % 2 === 0 ? 0 : Math.PI}
-            />,
-          )
-        }
-      }
+      const seats = openspaceSeats(room)
       return (
         <group>
-          {desks}
+          {seats.map((seat, i) => (
+            <Desk key={i} x={seat.x} z={seat.z} rotY={seat.rotY} />
+          ))}
           <Plant x={px} z={pz} />
         </group>
       )
     }
-    case 'reuniao':
+    case 'reuniao': {
+      const { w: tableW, d: tableD } = meetingTableSpan(room)
       return (
         <group>
-          <MeetingTable x={cx} z={cz} w={Math.min(w - 1.8, 3.2)} d={Math.min(d - 1.8, 1.3)} />
+          <MeetingTable x={cx} z={cz} w={tableW} d={tableD} seats={meetingSeats(room)} />
           <Plant x={cx + w / 2 - 0.6} z={cz + d / 2 - 0.6} />
         </group>
       )
+    }
     case 'refeitorio': {
       const tables = []
       const cols = Math.max(1, Math.floor((w - 1.4) / 2.4))

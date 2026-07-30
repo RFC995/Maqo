@@ -138,8 +138,10 @@ export function normalizarDevEui(valor: string | undefined | null): string {
 const CAMPO_PARA_MEDIDA: Record<string, Measurement> = {
   temperature: 'temperatura',
   temp: 'temperatura',
+  ambient_temperature: 'temperatura',
   humidity: 'humidade',
   hum: 'humidade',
+  relative_humidity: 'humidade',
   co2: 'co2',
   co2_ppm: 'co2',
   tvoc: 'tvoc',
@@ -169,6 +171,16 @@ const CAMPO_PARA_MEDIDA: Record<string, Measurement> = {
   current: 'corrente',
 }
 
+/**
+ * Some decoders report a state as text rather than a number — Tektelic's
+ * Vivid v3 codec, for instance, emits `motion_event_state: "Detected" | "None"`
+ * for its PIR. Maps a decoder field name to the measurement it feeds and which
+ * value counts as "on" (1); anything else on that field decodes to "off" (0).
+ */
+const CAMPO_TEXTO_PARA_MEDIDA: Record<string, { medida: Measurement; ligado: string }> = {
+  motion_event_state: { medida: 'ocupacao', ligado: 'detected' },
+}
+
 function numeroFinito(valor: unknown): number | null {
   const n = typeof valor === 'string' ? Number(valor) : valor
   return typeof n === 'number' && Number.isFinite(n) ? n : null
@@ -178,11 +190,18 @@ function numeroFinito(valor: unknown): number | null {
 function extrairValores(bruto: Record<string, unknown>): Partial<Record<Measurement, number>> {
   const valores: Partial<Record<Measurement, number>> = {}
   for (const [chave, valor] of Object.entries(bruto)) {
-    const medida = CAMPO_PARA_MEDIDA[chave.toLowerCase()]
-    if (!medida) continue
-    const n = numeroFinito(valor)
-    // first spelling wins, so a real value is never overwritten by an alias null
-    if (n !== null && valores[medida] === undefined) valores[medida] = n
+    const chaveMin = chave.toLowerCase()
+    const medida = CAMPO_PARA_MEDIDA[chaveMin]
+    if (medida) {
+      const n = numeroFinito(valor)
+      // first spelling wins, so a real value is never overwritten by an alias null
+      if (n !== null && valores[medida] === undefined) valores[medida] = n
+      continue
+    }
+    const texto = CAMPO_TEXTO_PARA_MEDIDA[chaveMin]
+    if (texto && typeof valor === 'string' && valores[texto.medida] === undefined) {
+      valores[texto.medida] = valor.toLowerCase() === texto.ligado ? 1 : 0
+    }
   }
   return valores
 }
